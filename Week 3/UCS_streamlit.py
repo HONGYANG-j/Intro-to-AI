@@ -182,7 +182,7 @@ with st.sidebar:
 
     if input_mode == "Sample":
         edge_text = sample_edges
-        st.image("UCS_img1.jpg", caption="Sample graph (if available)", use_container_width=True)
+        st.image("Week 3/UCS_img1.jpg", caption="Sample graph (if available)", use_container_width=True)
     else:
         edge_text = st.text_area(
             "Edges (one per line: src,dst,cost)",
