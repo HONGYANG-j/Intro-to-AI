@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
+import streamlit as st
 from collections import deque, defaultdict
 from typing import Dict, List, Tuple, Set
 
+# ---------- GRAPH SETUP ----------
 def build_graph() -> Dict[str, List[str]]:
     g = {
         'A': ['B', 'D'],
@@ -17,6 +19,7 @@ def build_graph() -> Dict[str, List[str]]:
         g[node] = sorted(g[node])
     return g
 
+# ---------- BFS ----------
 def full_bfs(graph: Dict[str, List[str]], start: str = 'A') -> Tuple[List[str], Dict[str, int]]:
     visited: Set[str] = set()
     order: List[str] = []
@@ -24,8 +27,7 @@ def full_bfs(graph: Dict[str, List[str]], start: str = 'A') -> Tuple[List[str], 
     all_nodes = sorted(graph.keys())
 
     def bfs_from_root(root: str):
-        q = deque()
-        q.append((root, 0))
+        q = deque([(root, 0)])
         visited.add(root)
         levels[root] = 0
         while q:
@@ -44,6 +46,7 @@ def full_bfs(graph: Dict[str, List[str]], start: str = 'A') -> Tuple[List[str], 
             bfs_from_root(node)
     return order, levels
 
+# ---------- DFS ----------
 def full_dfs(graph: Dict[str, List[str]], start: str = 'A') -> List[str]:
     visited: Set[str] = set()
     order: List[str] = []
@@ -57,34 +60,45 @@ def full_dfs(graph: Dict[str, List[str]], start: str = 'A') -> List[str]:
                 dfs(nb)
 
     if start in all_nodes:
-        if start not in visited:
-            dfs(start)
+        dfs(start)
     for node in all_nodes:
         if node not in visited:
             dfs(node)
     return order
 
-def print_bfs_result(order: List[str], levels: Dict[str, int]):
-    print("BFS visitation order:", ", ".join(order))
-    level_groups = defaultdict(list)
-    for node, lvl in levels.items():
-        level_groups[lvl].append(node)
-    print("BFS levels (per component root):")
-    for lvl in sorted(level_groups.keys()):
-        nodes = sorted(level_groups[lvl])
-        print(f"  Level {lvl}: {{ {', '.join(nodes)} }}")
+# ---------- STREAMLIT APP ----------
+st.set_page_config(page_title="Graph Traversal Visualizer", page_icon="🌐")
 
-def print_dfs_result(order: List[str]):
-    print("DFS visitation order:", ", ".join(order))
+st.title("🌐 Graph Traversal Visualizer")
+st.markdown("""
+Visualize **Breadth-First Search (BFS)** and **Depth-First Search (DFS)**  
+on a simple directed graph.
+""")
 
-def main():
-    graph = build_graph()
-    for n in sorted(graph.keys()):
-        print(f"{n} -> {graph[n]}")
-    bfs_order, bfs_levels = full_bfs(graph, start='A')
-    print_bfs_result(bfs_order, bfs_levels)
-    dfs_order = full_dfs(graph, start='A')
-    print_dfs_result(dfs_order)
+# Build and show the graph
+graph = build_graph()
 
-if __name__ == "__main__":
-    main()
+st.subheader("Graph Adjacency List")
+for node in sorted(graph.keys()):
+    st.write(f"**{node} →** {graph[node]}")
+
+# Controls
+start_node = st.selectbox("Choose a start node:", sorted(graph.keys()), index=0)
+traversal = st.radio("Choose traversal type:", ["BFS", "DFS"])
+
+# Run traversal
+if st.button("Run Traversal"):
+    if traversal == "BFS":
+        order, levels = full_bfs(graph, start=start_node)
+        st.success(f"BFS Visitation Order: {', '.join(order)}")
+
+        st.subheader("BFS Levels")
+        level_groups = defaultdict(list)
+        for node, lvl in levels.items():
+            level_groups[lvl].append(node)
+        for lvl in sorted(level_groups.keys()):
+            st.write(f"**Level {lvl}:** {', '.join(sorted(level_groups[lvl]))}")
+
+    else:
+        order = full_dfs(graph, start=start_node)
+        st.success(f"DFS Visitation Order: {', '.join(order)}")
