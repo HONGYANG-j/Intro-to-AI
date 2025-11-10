@@ -1,3 +1,4 @@
-streamlit>=1.20,<2.0
-networkx>=3.0,<4.0
-matplotlib==3.7.2
+streamlit
+networkx
+matplotlib
+pillow
