@@ -74,7 +74,7 @@ st.title("Graph Representation")
 
 try:
     image = Image.open("Lab-Report/Lab-Report-1/LabReport_BSD2513_#1.jpg")
-    st.image(image, caption="Directed Graph Example", use_container_width=True)
+    st.image(image, use_container_width=True)
 except FileNotFoundError:
     st.warning("⚠️ Graph image not found. Please check the file name or path.")
 
