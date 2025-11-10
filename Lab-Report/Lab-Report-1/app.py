@@ -1,6 +1,4 @@
 import streamlit as st
-import networkx as nx
-import matplotlib.pyplot as plt
 from collections import defaultdict, deque
 from typing import Dict, List, Tuple
 from PIL import Image
@@ -82,7 +80,7 @@ except FileNotFoundError:
 
 st.markdown("---")
 
-# Section 2: Graph Traversal Visualizer
+# Section 2: Traversal Visualizer
 st.title("🌐 Graph Traversal Visualizer")
 st.markdown("Visualize **Breadth-First Search (BFS)** and **Depth-First Search (DFS)** on a directed graph.")
 
@@ -110,16 +108,3 @@ if st.button("Run Traversal"):
     else:
         order = full_dfs(graph, start=start_node)
         st.success(f"**DFS Order:** {', '.join(order)}")
-
-    # Draw the Graph
-    G = nx.DiGraph()
-    for n, nbrs in graph.items():
-        for nb in nbrs:
-            G.add_edge(n, nb)
-
-    pos = nx.spring_layout(G, seed=42)
-    plt.figure(figsize=(6, 4))
-    nx.draw(G, pos, with_labels=True, node_size=900, node_color="#a2d2ff", arrowsize=18)
-    st.pyplot(plt.gcf())
-    plt.clf()
-
