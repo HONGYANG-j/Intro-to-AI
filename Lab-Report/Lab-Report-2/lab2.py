@@ -1,65 +1,79 @@
+import streamlit as st
 import random
 
-# --- GA PARAMETERS ---
-POPULATION_SIZE = 300
-CHROMOSOME_LENGTH = 80
-GENERATIONS = 50
+# --- STREAMLIT PAGE SETTINGS ---
+st.set_page_config(page_title="Genetic Algorithm Demo", page_icon="🧬")
 
-# Fitness: maximum value when number of ones = 50
+st.title("🧬 Genetic Algorithm Simulator")
+st.write("This app runs a simple Genetic Algorithm to optimize a bitstring of length 80.")
+
+# --- GA PARAMETERS (editable by user) ---
+POPULATION_SIZE = st.slider("Population Size", 50, 500, 300)
+CHROMOSOME_LENGTH = 80
+GENERATIONS = st.slider("Number of Generations", 10, 200, 50)
+MUTATION_RATE = st.slider("Mutation Rate", 0.001, 0.1, 0.01)
+
+st.divider()
+
+st.subheader("Genetic Algorithm Output")
+
+# --- FITNESS FUNCTION ---
 def fitness(individual):
     ones = sum(individual)
-    return 80 if ones == 50 else ones
+    return 80 if ones == 50 else ones  # 80 = max score
 
-# Generate random individual
+# --- GA OPERATORS ---
 def generate_individual():
     return [random.randint(0, 1) for _ in range(CHROMOSOME_LENGTH)]
 
-# Create initial population
 def create_population():
     return [generate_individual() for _ in range(POPULATION_SIZE)]
 
-# Selection: tournament
 def selection(population):
     a, b = random.sample(population, 2)
     return a if fitness(a) > fitness(b) else b
 
-# Crossover: single point
-def crossover(parent1, parent2):
+def crossover(p1, p2):
     point = random.randint(1, CHROMOSOME_LENGTH - 1)
-    return parent1[:point] + parent2[point:], parent2[:point] + parent1[point:]
+    return p1[:point] + p2[point:], p2[:point] + p1[point:]
 
-# Mutation
-def mutate(individual, mutation_rate=0.01):
-    return [bit if random.random() > mutation_rate else 1-bit for bit in individual]
+def mutate(individual):
+    return [bit if random.random() > MUTATION_RATE else 1-bit for bit in individual]
 
-# Main GA
-population = create_population()
+# Run GA only when button is clicked
+if st.button("Run Genetic Algorithm"):
+    population = create_population()
+    best_scores = []
 
-for generation in range(GENERATIONS):
-    new_population = []
+    progress = st.progress(0)
+    status = st.empty()
 
-    for _ in range(POPULATION_SIZE):
-        # Select parents
-        parent1 = selection(population)
-        parent2 = selection(population)
+    for generation in range(GENERATIONS):
+        new_population = []
 
-        # Crossover
-        child1, child2 = crossover(parent1, parent2)
+        for _ in range(POPULATION_SIZE):
+            parent1 = selection(population)
+            parent2 = selection(population)
 
-        # Mutation
-        child1 = mutate(child1)
-        child2 = mutate(child2)
+            child1, child2 = crossover(parent1, parent2)
+            child1 = mutate(child1)
+            child2 = mutate(child2)
 
-        new_population.extend([child1, child2])
+            new_population.extend([child1, child2])
 
-    # Keep best 300
-    population = sorted(new_population, key=fitness, reverse=True)[:POPULATION_SIZE]
+        # Keep best individuals
+        population = sorted(new_population, key=fitness, reverse=True)[:POPULATION_SIZE]
 
-    # Best fitness of generation
-    best_score = fitness(population[0])
-    print(f"Generation {generation+1}: Best Fitness = {best_score}")
+        best_score = fitness(population[0])
+        best_scores.append(best_score)
 
-# Final result
-print("\nBest Individual Found:")
-print("Bitstring:", population[0])
-print("Fitness:", fitness(population[0]))
+        progress.progress((generation + 1) / GENERATIONS)
+        status.write(f"Generation {generation+1}: Best Fitness = {best_score}")
+
+    st.success("Genetic Algorithm Completed!")
+
+    st.subheader("Best Individual Found")
+    st.write("Bitstring:", "".join(map(str, population[0])))
+    st.write("Fitness:", fitness(population[0]))
+
+    st.line_chart(best_scores)
