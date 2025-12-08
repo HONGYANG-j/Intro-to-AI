@@ -2,4 +2,7 @@ streamlit
 PyPDF2
 nltk==3.8.1
 matplotlib
-sklearn
+PyPDF2
+scikit-learn
+pandas
+numpy
