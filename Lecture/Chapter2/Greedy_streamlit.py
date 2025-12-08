@@ -185,7 +185,7 @@ with st.sidebar:
 
     if input_mode == "Sample":
         edge_text = sample_edges
-        st.image("UCS_img1.jpg", caption="Sample graph (if available)", use_container_width=True)
+        st.image("Lecture/Chapter2/UCS_img1.jpg", caption="Sample graph (if available)", use_container_width=True)
     else:
         edge_text = st.text_area(
             "Edges (one per line: src,dst,cost)",
@@ -268,3 +268,4 @@ if run_btn and start_node:
 
 else:
     st.info("Set start/goal, edit heuristic if needed, and click Run Greedy to execute.")
+
