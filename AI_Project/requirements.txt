@@ -3,7 +3,6 @@ pandas
 networkx
 matplotlib
 opencv-python-headless
-pyzbar
 numpy
 python-barcode
 pillow
