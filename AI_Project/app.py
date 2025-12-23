@@ -58,45 +58,57 @@ with st.sidebar:
     st.caption("Group Project BSD3513")
 
 # ==========================================
-# 2. HELPER FUNCTIONS (CRASH-PROOF)
+# 2. HELPER FUNCTIONS (ENHANCED & ROBUST)
 # ==========================================
 
 def generate_barcode_img(text_data):
-    """Generates a high-contrast barcode image."""
+    """Generates a barcode with standard width."""
     code128 = barcode.get_barcode_class('code128')
     rv = io.BytesIO()
-    options = {"module_width": 0.4, "module_height": 15, "quiet_zone": 10}
+    # Tweaked width to 0.3 for better readability
+    options = {"module_width": 0.3, "module_height": 10, "quiet_zone": 10}
     code128(text_data, writer=ImageWriter()).write(rv, options=options)
     return rv
 
 def safe_detect(detector, img):
     """
     Helper to safely handle OpenCV return values.
-    Some versions return 3 values, others return 4.
-    This function checks length before unpacking.
+    Checks length before unpacking to prevent crashes.
     """
     result = detector.detectAndDecode(img)
     
     retval = False
     decoded_info = []
     
-    # Check if result is valid tuple
     if isinstance(result, tuple):
         if len(result) == 4:
             retval, decoded_info, decoded_type, points = result
         elif len(result) == 3:
             retval, decoded_info, points = result
     
-    # Return first barcode if found
     if retval and decoded_info:
         return decoded_info[0]
     return None
 
 def decode_opencv_robust(uploaded_image):
-    """Tries multiple image processing techniques to read the barcode."""
-    uploaded_image.seek(0)
-    file_bytes = np.asarray(bytearray(uploaded_image.read()), dtype=np.uint8)
-    img = cv2.imdecode(file_bytes, 1)
+    """
+    Super Robust Decoder:
+    1. Fixes transparency (Alpha Channel) issues.
+    2. Tries 5 different image processing techniques.
+    """
+    # 1. Load with PIL to handle transparency/formats correctly
+    image = Image.open(uploaded_image)
+    
+    # 2. Convert to RGB (Force white background if transparent)
+    if image.mode in ('RGBA', 'LA'):
+        background = Image.new(image.mode[:-1], image.size, (255, 255, 255))
+        background.paste(image, image.split()[-1])
+        image = background
+    image = image.convert('RGB')
+    
+    # 3. Convert to OpenCV Format (numpy array)
+    img = np.array(image)
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR) # OpenCV uses BGR
     
     detector = cv2.barcode_BarcodeDetector()
     
@@ -109,14 +121,19 @@ def decode_opencv_robust(uploaded_image):
     code = safe_detect(detector, gray)
     if code: return code
     
-    # --- Attempt 3: Thresholding ---
-    _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
+    # --- Attempt 3: Otsu Thresholding (High Contrast) ---
+    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     code = safe_detect(detector, thresh)
     if code: return code
 
-    # --- Attempt 4: Zoom/Scale Up ---
-    scaled = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-    code = safe_detect(detector, scaled)
+    # --- Attempt 4: Zoom In (2x) ---
+    zoomed = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+    code = safe_detect(detector, zoomed)
+    if code: return code
+
+    # --- Attempt 5: Zoom Out (0.5x - Helps if barcode is too big) ---
+    shrunk = cv2.resize(gray, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
+    code = safe_detect(detector, shrunk)
     if code: return code
 
     return None
@@ -162,7 +179,7 @@ with tab1:
         track_file = st.file_uploader("Upload Barcode Image", type=['png', 'jpg', 'jpeg'], key="tracker")
         
         if track_file:
-            # Use the robust decoder
+            # Use the SUPER robust decoder
             scanned_code = decode_opencv_robust(track_file)
             
             if scanned_code:
@@ -178,7 +195,7 @@ with tab1:
                 else:
                     st.error("❌ ID not found in database.")
             else:
-                st.warning("⚠️ Could not read barcode. Try cropping the white border slightly.")
+                st.warning("⚠️ Still cannot read. Try re-generating the barcode.")
 
 # --- TAB 2 ---
 with tab2:
