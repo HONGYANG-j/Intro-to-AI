@@ -62,20 +62,37 @@ with st.sidebar:
 # ==========================================
 # 2. HELPER FUNCTIONS
 # ==========================================
-def generate_barcode_img(text_data):
-    """Generates a barcode image in memory."""
-    code128 = barcode.get_barcode_class('code128')
-    rv = io.BytesIO()
-    code128(text_data, writer=ImageWriter()).write(rv)
-    return rv
-
 def decode_opencv(uploaded_image):
-    """Decodes barcode using OpenCV."""
+    """Decodes barcode using OpenCV with version compatibility."""
+    # Reset file pointer to ensure we read from the start
+    uploaded_image.seek(0)
+    
     file_bytes = np.asarray(bytearray(uploaded_image.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
+    
+    # Initialize OpenCV Barcode Detector
     bardet = cv2.barcode_BarcodeDetector()
-    retval, decoded_info, decoded_type, points = bardet.detectAndDecode(img)
-    return decoded_info[0] if retval else None
+    
+    # Detect and Decode
+    result = bardet.detectAndDecode(img)
+    
+    # Initialize variables
+    retval = False
+    decoded_info = []
+    
+    # Handle different OpenCV return signatures (3 vs 4 values)
+    if isinstance(result, tuple):
+        if len(result) == 4:
+            retval, decoded_info, decoded_type, points = result
+        elif len(result) == 3:
+            retval, decoded_info, points = result
+    
+    # Return the first decoded barcode if found
+    if retval and decoded_info:
+        # decoded_info is a list of strings, return the first one
+        return decoded_info[0]
+        
+    return None
 
 def determine_hub(region):
     """Assigns a hub based on region."""
