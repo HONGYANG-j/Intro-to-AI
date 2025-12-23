@@ -4,5 +4,6 @@ networkx
 matplotlib
 opencv-python-headless
 numpy
-python-barcode
 pillow
+python-barcode
+qrcode
