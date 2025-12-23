@@ -4,7 +4,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import cv2
 import numpy as np
-from PIL import Image, ImageEnhance, ImageOps
+from PIL import Image
 import barcode
 from barcode.writer import ImageWriter
 import io
@@ -12,7 +12,11 @@ import io
 # ==========================================
 # 0. PAGE CONFIGURATION & SESSION SETUP
 # ==========================================
-st.set_page_config(page_title="SmartTrack Logistics", layout="wide", page_icon="📦")
+st.set_page_config(
+    page_title="SmartTrack Logistics",
+    layout="wide",
+    page_icon="📦"
+)
 
 if 'df_cust' not in st.session_state:
     st.session_state['df_cust'] = None
@@ -21,231 +25,201 @@ if 'df_post' not in st.session_state:
 if 'tracked_order' not in st.session_state:
     st.session_state['tracked_order'] = None
 
+# ==========================================
+# 1. STYLES
+# ==========================================
 st.markdown("""
 <style>
-    .header-style {font-size:24px; font-weight:bold; color:#2E86C1;}
-    .success-box {padding:10px; background-color:#D4EFDF; border-radius:5px; color:#186A3B;}
-    .info-box {padding:10px; background-color:#D6EAF8; border-radius:5px; color:#21618C;}
+.header-style {font-size:24px; font-weight:bold; color:#2E86C1;}
+.info-box {padding:10px; background-color:#D6EAF8; border-radius:5px;}
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. SIDEBAR: SYSTEM SETUP
-# ==========================================
-with st.sidebar:
-    st.header("⚙️ 1. System Setup")
-    st.info("Upload the required databases to start.")
-    
-    cust_file = st.file_uploader("Upload 'Customer.csv'", type=['csv'])
-    if cust_file:
-        try:
-            st.session_state['df_cust'] = pd.read_csv(cust_file)
-            st.success("✅ Customer DB Loaded")
-        except Exception as e:
-            st.error(f"Error: {e}")
-
-    post_file = st.file_uploader("Upload 'Malaysia_Postcode...csv'", type=['csv'])
-    if post_file:
-        try:
-            st.session_state['df_post'] = pd.read_csv(post_file)
-            st.success("✅ Postcode DB Loaded")
-        except Exception as e:
-            st.error(f"Error: {e}")
-            
-    st.divider()
-    st.caption("Group Project BSD3513")
-
-# ==========================================
-# 2. HELPER FUNCTIONS (ULTRA ROBUST)
+# 2. BARCODE FUNCTIONS (FIXED & ROBUST)
 # ==========================================
 
 def generate_barcode_img(text_data):
-    """Generates a barcode optimized for OpenCV reading."""
+    """Generate high-resolution barcode for reliable OpenCV scanning"""
     code128 = barcode.get_barcode_class('code128')
-    rv = io.BytesIO()
-    
-    # Large module width and high quiet zone for clarity
+    buffer = io.BytesIO()
+
     options = {
-        "module_width": 0.5, 
-        "module_height": 20, 
-        "quiet_zone": 20, 
-        "background": "white", 
+        "module_width": 1.2,
+        "module_height": 60,
+        "quiet_zone": 30,
+        "font_size": 0,
+        "dpi": 300,
+        "background": "white",
         "foreground": "black"
     }
-    
-    code128(text_data, writer=ImageWriter()).write(rv, options=options)
-    return rv
 
-def safe_detect(detector, img):
-    """Safely unpacks OpenCV results."""
-    result = detector.detectAndDecode(img)
-    retval, decoded_info = False, []
-    
-    if isinstance(result, tuple):
-        if len(result) == 4:
-            retval, decoded_info, _, _ = result
-        elif len(result) == 3:
-            retval, decoded_info, _ = result
-    
-    if retval and decoded_info:
-        # Return first non-empty string
-        for code in decoded_info:
-            if code: return code
-    return None
+    code128(text_data, writer=ImageWriter()).write(buffer, options=options)
+    buffer.seek(0)
+    return buffer
 
-def decode_opencv_robust(uploaded_image):
-    """
-    Ultra-Robust Decoder.
-    Preprocessing pipeline: RGB -> Grayscale -> Thresholding -> Scaling
-    """
-    # 1. Open with PIL
+
+def decode_barcode(uploaded_image):
+    """Reliable barcode decoding using OpenCV"""
     try:
-        image = Image.open(uploaded_image)
+        image = Image.open(uploaded_image).convert("L")
     except:
         return None
 
-    # 2. Handle Transparency (Alpha Channel) -> Force White Background
-    if image.mode in ('RGBA', 'LA') or (image.mode == 'P' and 'transparency' in image.info):
-        alpha = image.convert('RGBA').split()[-1]
-        bg = Image.new("RGB", image.size, (255, 255, 255))
-        bg.paste(image, mask=alpha)
-        image = bg
-    else:
-        image = image.convert('RGB')
-
-    # 3. Enhance Contrast
-    enhancer = ImageEnhance.Contrast(image)
-    image = enhancer.enhance(2.0) # Double contrast
-
-    # 4. Convert to OpenCV format (BGR)
     img = np.array(image)
-    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    
+
+    # Binary threshold (important)
+    _, img = cv2.threshold(img, 150, 255, cv2.THRESH_BINARY)
+
+    # Upscale image
+    img = cv2.resize(img, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_CUBIC)
+
     detector = cv2.barcode_BarcodeDetector()
+    ok, decoded_info, _, _ = detector.detectAndDecode(img)
 
-    # --- ATTEMPT SEQUENCE ---
-    
-    # 1. Normal
-    res = safe_detect(detector, img)
-    if res: return res
-
-    # 2. Grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    res = safe_detect(detector, gray)
-    if res: return res
-
-    # 3. Binary Threshold (Pure Black & White)
-    _, thresh = cv2.threshold(gray, 120, 255, cv2.THRESH_BINARY)
-    res = safe_detect(detector, thresh)
-    if res: return res
-
-    # 4. Inverted (White bars on black background - sometimes helps)
-    inverted = cv2.bitwise_not(gray)
-    res = safe_detect(detector, inverted)
-    if res: return res
-    
-    # 5. Zoom In (2x)
-    zoomed = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
-    res = safe_detect(detector, zoomed)
-    if res: return res
+    if ok and decoded_info:
+        for code in decoded_info:
+            if code.strip():
+                return code.strip()
 
     return None
 
+
 def determine_hub(region):
-    if pd.isna(region): return "General Hub (KL)"
-    region = str(region).strip()
-    if region == 'Central': return "Central Hub (Shah Alam)"
-    if region == 'North': return "Northern Hub (Ipoh)"
-    if region == 'South': return "Southern Hub (Johor Bahru)"
-    if region == 'East': return "East Coast Hub (Kuantan)"
+    if pd.isna(region):
+        return "General Hub (KL)"
+    region = region.strip()
+    if region == 'Central':
+        return "Central Hub (Shah Alam)"
+    if region == 'North':
+        return "Northern Hub (Ipoh)"
+    if region == 'South':
+        return "Southern Hub (Johor Bahru)"
+    if region == 'East':
+        return "East Coast Hub (Kuantan)"
     return "International Hub (KLIA)"
 
 # ==========================================
-# 3. MAIN INTERFACE
+# 3. SIDEBAR – DATA UPLOAD
 # ==========================================
+with st.sidebar:
+    st.header("⚙️ System Setup")
+
+    cust_file = st.file_uploader("Upload Customer.csv", type="csv")
+    if cust_file:
+        st.session_state['df_cust'] = pd.read_csv(cust_file)
+        st.success("Customer database loaded")
+
+    post_file = st.file_uploader("Upload Malaysia_Postcode.csv", type="csv")
+    if post_file:
+        st.session_state['df_post'] = pd.read_csv(post_file)
+        st.success("Postcode database loaded")
+
+    st.caption("Group Project BSD3513")
 
 if st.session_state['df_cust'] is None or st.session_state['df_post'] is None:
-    st.warning("⚠️ Please upload BOTH datasets in the sidebar first.")
+    st.warning("Please upload BOTH datasets to continue.")
     st.stop()
 
-tab1, tab2 = st.tabs(["🛒 Page 1: Buy & Track", "🌳 Page 2: Logistics Tree Diagram"])
+df = st.session_state['df_cust']
 
-# --- TAB 1 ---
+# ==========================================
+# 4. MAIN TABS
+# ==========================================
+tab1, tab2 = st.tabs(["🛒 Buy & Track", "🌳 Logistics Route"])
+
+# ==========================================
+# TAB 1 – BUY & TRACK
+# ==========================================
 with tab1:
     st.markdown('<p class="header-style">Customer Portal</p>', unsafe_allow_html=True)
-    col_buy, col_track = st.columns(2)
-    
-    with col_buy:
-        st.markdown('<div class="info-box">🛒 <b>Step A: Buy Item</b></div>', unsafe_allow_html=True)
-        df = st.session_state['df_cust']
-        options = df['Order ID'].astype(str) + " | " + df['Customer Name'].astype(str)
-        selected_option = st.selectbox("Choose an Order:", options.head(50))
-        
+
+    col1, col2 = st.columns(2)
+
+    # ---- BUY ITEM ----
+    with col1:
+        st.markdown('<div class="info-box"><b>Step A: Buy Item</b></div>', unsafe_allow_html=True)
+
+        options = df['Order ID'].astype(str) + " | " + df['Customer Name']
+        selected = st.selectbox("Choose an Order", options)
+
         if st.button("Confirm Purchase"):
-            order_id = selected_option.split(" | ")[0]
-            img_data = generate_barcode_img(order_id)
-            st.image(img_data, caption=f"Tracking ID: {order_id} (Enhanced)")
-            st.download_button("📥 Download Barcode", img_data, f"{order_id}.png", "image/png")
-    
-    with col_track:
-        st.markdown('<div class="info-box">🔍 <b>Step B: Track Status</b></div>', unsafe_allow_html=True)
-        track_file = st.file_uploader("Upload Barcode Image", type=['png', 'jpg', 'jpeg'], key="tracker")
-        
-        if track_file:
-            scanned_code = decode_opencv_robust(track_file)
-            
-            if scanned_code:
-                st.success(f"✅ Code Scanned: {scanned_code}")
-                record = df[df['Order ID'] == scanned_code]
+            order_id = selected.split(" | ")[0]
+            barcode_img = generate_barcode_img(order_id)
+
+            st.image(barcode_img, caption=f"Tracking ID: {order_id}")
+            st.download_button(
+                "Download Barcode",
+                barcode_img,
+                file_name=f"{order_id}.png",
+                mime="image/png"
+            )
+
+    # ---- TRACK ITEM ----
+    with col2:
+        st.markdown('<div class="info-box"><b>Step B: Track Order</b></div>', unsafe_allow_html=True)
+
+        uploaded = st.file_uploader("Upload Barcode Image", type=['png', 'jpg'])
+
+        if uploaded:
+            st.image(uploaded, caption="Uploaded Barcode (Preview)")
+            scanned = decode_barcode(uploaded)
+
+            if scanned:
+                st.success(f"Scanned Order ID: {scanned}")
+
+                record = df[df['Order ID'].astype(str) == scanned]
                 if not record.empty:
                     data = record.iloc[0]
                     st.session_state['tracked_order'] = data
-                    st.write(f"**Status:** 🚚 Delivering")
-                    st.write(f"**Customer:** {data['Customer Name']}")
-                    st.write(f"**Destination:** {data['City']}, {data['State']}")
-                    st.info("👉 Check 'Page 2' tab for the route!")
-                else:
-                    st.error("❌ ID not found in database.")
-            else:
-                st.warning("⚠️ Still unreadable. Try re-generating the barcode (Step A) and ensure the downloaded image is not modified.")
 
-# --- TAB 2 ---
+                    st.write(f"Customer: {data['Customer Name']}")
+                    st.write(f"Destination: {data['City']}, {data['State']}")
+                    st.info("Go to Page 2 to view delivery route")
+                else:
+                    st.error("Order ID not found")
+            else:
+                st.error("Barcode unreadable. Please regenerate and upload original image.")
+
+# ==========================================
+# TAB 2 – LOGISTICS ROUTE
+# ==========================================
 with tab2:
     st.markdown('<p class="header-style">Logistics Route Visualization</p>', unsafe_allow_html=True)
-    order_data = st.session_state['tracked_order']
-    
-    if order_data is not None:
-        node_A = "Port Klang (Start)"
-        node_B = determine_hub(order_data['Region'])
-        node_C = f"{order_data['State']} Dist. Center"
-        node_D = f"Home: {order_data['City']}"
-        
-        G = nx.DiGraph()
-        t1, t2, t3 = 4.5, 2.0, 1.0
-        G.add_edge(node_A, node_B, weight=t1)
-        G.add_edge(node_B, node_C, weight=t2)
-        G.add_edge(node_C, node_D, weight=t3)
-        
-        pos = {node_A: (0, 4), node_B: (0, 3), node_C: (0, 2), node_D: (0, 1)}
-        
-        fig, ax = plt.subplots(figsize=(8, 6))
-        nx.draw_networkx_nodes(G, pos, node_size=2500, node_color='#AED6F1', node_shape='s', ax=ax)
-        nx.draw_networkx_edges(G, pos, width=2, edge_color='#2874A6', arrowsize=20, ax=ax)
-        nx.draw_networkx_labels(G, pos, font_size=10, font_weight="bold", ax=ax)
-        
-        edge_labels = {
-            (node_A, node_B): f"{t1} Hrs",
-            (node_B, node_C): f"{t2} Hrs",
-            (node_C, node_D): f"{t3} Hrs"
-        }
-        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_color='red', ax=ax)
-        
-        ax.set_title(f"Delivery Path for Order #{order_data['Order ID']}")
-        ax.axis('off')
-        st.pyplot(fig)
-        
-        st.divider()
-        st.metric(label="⏱️ Total Estimated Arrival Time", value=f"{t1 + t2 + t3} Hours")
-        
-    else:
-        st.info("ℹ️ No active order. Scan a barcode in Page 1 first.")
+
+    order = st.session_state['tracked_order']
+
+    if order is None:
+        st.info("Scan a barcode first on Page 1")
+        st.stop()
+
+    start = "Port Klang"
+    hub = determine_hub(order['Region'])
+    dc = f"{order['State']} Distribution Center"
+    home = f"Customer Home ({order['City']})"
+
+    G = nx.DiGraph()
+    G.add_edge(start, hub, weight=4.5)
+    G.add_edge(hub, dc, weight=2.0)
+    G.add_edge(dc, home, weight=1.0)
+
+    pos = {
+        start: (0, 3),
+        hub: (0, 2),
+        dc: (0, 1),
+        home: (0, 0)
+    }
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    nx.draw(G, pos, with_labels=True, node_size=2500,
+            node_color="#AED6F1", font_weight="bold", ax=ax)
+    labels = nx.get_edge_attributes(G, 'weight')
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=labels, ax=ax)
+
+    ax.set_title(f"Delivery Route for Order {order['Order ID']}")
+    ax.axis("off")
+
+    st.pyplot(fig)
+
+    total_time = sum(labels.values())
+    st.metric("Total Estimated Delivery Time", f"{total_time} Hours")
