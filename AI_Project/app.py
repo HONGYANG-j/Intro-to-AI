@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
-import folium
-from streamlit_folium import st_folium
-from math import radians, cos, sin, asin, sqrt
+import networkx as nx
+import matplotlib.pyplot as plt
 import cv2
 import numpy as np
 from PIL import Image
@@ -12,7 +11,6 @@ import io
 # ==========================================
 # 0. PAGE CONFIGURATION & SESSION SETUP
 # ==========================================
-
 st.set_page_config(
     page_title="SmartTrack Logistics",
     layout="wide",
@@ -27,7 +25,6 @@ if "tracked_order" not in st.session_state:
 # ==========================================
 # 1. STYLES
 # ==========================================
-
 st.markdown("""
 <style>
 .header-style {font-size:24px; font-weight:bold; color:#2E86C1;}
@@ -38,34 +35,39 @@ st.markdown("""
 # ==========================================
 # 2. QR CODE FUNCTIONS
 # ==========================================
-
 def generate_qr_code(text):
     qr = qrcode.QRCode(
         version=2,
         error_correction=qrcode.constants.ERROR_CORRECT_H,
-        box_size=8,
+        box_size=10,
         border=4
     )
     qr.add_data(text)
     qr.make(fit=True)
 
     img = qr.make_image(fill_color="black", back_color="white")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return buf
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer
 
 def decode_qr_code(uploaded_image):
-    image = Image.open(uploaded_image).convert("RGB")
+    try:
+        image = Image.open(uploaded_image).convert("RGB")
+    except:
+        return None
+
     img = np.array(image)
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+
     detector = cv2.QRCodeDetector()
     data, _, _ = detector.detectAndDecode(img)
+
     return data if data else None
 
 # ==========================================
 # 3. SIDEBAR – DATA UPLOAD
 # ==========================================
-
 with st.sidebar:
     st.header("⚙️ System Setup")
 
@@ -77,7 +79,7 @@ with st.sidebar:
     st.caption("Group Project BSD3513")
 
 if st.session_state.df_cust is None:
-    st.warning("Please upload Customer dataset.")
+    st.warning("Please upload Customer.csv to continue.")
     st.stop()
 
 df = st.session_state.df_cust
@@ -85,127 +87,111 @@ df = st.session_state.df_cust
 # ==========================================
 # 4. MAIN TABS
 # ==========================================
-
 tab1, tab2 = st.tabs(
-    ["🛒 Page 1: Buy & Track", "🗺️ Page 2: Logistics Route"]
+    ["🛒 Page 1: Buy & Track", "📍 Page 2: Static Logistics Route"]
 )
 
 # ==========================================
 # TAB 1 – BUY & TRACK
 # ==========================================
-
 with tab1:
     st.markdown('<p class="header-style">Customer Portal</p>', unsafe_allow_html=True)
 
-    col1, col2 = st.columns(2)
+    col_buy, col_track = st.columns(2)
 
-    with col1:
+    # ---- BUY ITEM ----
+    with col_buy:
         st.markdown('<div class="info-box"><b>Step A: Buy Item</b></div>', unsafe_allow_html=True)
 
-        options = df["Order ID"].astype(str) + " | " + df["Customer Name"]
+        options = (
+            df["Order ID"].astype(str)
+            + " | "
+            + df["Customer Name"].astype(str)
+        )
+
         selected = st.selectbox("Choose an Order", options)
 
         if st.button("Confirm Purchase"):
             order_id = selected.split(" | ")[0]
-            qr = generate_qr_code(order_id)
-            st.image(qr, caption=f"Tracking ID: {order_id}")
+            qr_img = generate_qr_code(order_id)
+
+            st.image(qr_img, caption=f"Tracking ID: {order_id}")
             st.download_button(
                 "📥 Download QR Code",
-                qr,
+                qr_img,
                 file_name=f"{order_id}_QR.png",
                 mime="image/png"
             )
 
-    with col2:
+    # ---- TRACK ITEM ----
+    with col_track:
         st.markdown('<div class="info-box"><b>Step B: Track Order</b></div>', unsafe_allow_html=True)
 
-        uploaded = st.file_uploader("Upload QR Code", type=["png", "jpg", "jpeg"])
+        uploaded = st.file_uploader(
+            "Upload QR Code Image",
+            type=["png", "jpg", "jpeg"]
+        )
+
         if uploaded:
             scanned = decode_qr_code(uploaded)
             if scanned:
-                st.success(f"Order ID: {scanned}")
                 record = df[df["Order ID"].astype(str) == scanned]
                 if not record.empty:
                     st.session_state.tracked_order = record.iloc[0]
-                    st.info("Go to Page 2 to view delivery route")
+                    st.success(f"✅ Order {scanned} Found")
+                else:
+                    st.error("❌ Order not found")
             else:
-                st.error("QR Code not detected")
+                st.error("⚠️ QR Code not detected")
 
 # ==========================================
-# TAB 2 – LOGISTICS ROUTE (PAHANG ONLY)
+# TAB 2 – STATIC LOGISTICS ROUTE
 # ==========================================
-
-PORT_KUANTAN = ("Port Kuantan", 3.9767, 103.4242)
-KUANTAN_HUB = ("Kuantan Hub", 3.8168, 103.3317)
-
-def haversine(lat1, lon1, lat2, lon2):
-    R = 6371
-    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
-    return 2 * R * asin(sqrt(a))
-
 with tab2:
-    st.markdown('<p class="header-style">Logistics Route (Pahang Only)</p>', unsafe_allow_html=True)
+    st.markdown('<p class="header-style">📍 Static Logistics Route</p>', unsafe_allow_html=True)
 
     order = st.session_state.tracked_order
     if order is None:
-        st.info("Please scan QR code first.")
+        st.info("Scan a QR code in Page 1 first.")
         st.stop()
 
-    # Fake customer coordinates near Kuantan
-    home_lat = KUANTAN_HUB[1] + 0.12
-    home_lon = KUANTAN_HUB[2] + 0.12
+    # --- Nodes ---
+    port = "🚢 Port Kuantan\n(3.9767°N, 103.4242°E)"
+    hub = "🏭 Kuantan Hub"
+    dc = f"📦 {order['State']} Distribution Center"
+    home = f"🏠 Customer Home ({order['City']})"
 
-    d1 = haversine(PORT_KUANTAN[1], PORT_KUANTAN[2], KUANTAN_HUB[1], KUANTAN_HUB[2])
-    d2 = haversine(KUANTAN_HUB[1], KUANTAN_HUB[2], home_lat, home_lon)
+    # --- Graph ---
+    G = nx.DiGraph()
+    G.add_edge(port, hub, weight=4.5)
+    G.add_edge(hub, dc, weight=2.0)
+    G.add_edge(dc, home, weight=1.0)
 
-    total_time = (d1 / 80) + (d2 / 60)
+    pos = {
+        port: (0, 3),
+        hub: (0, 2),
+        dc: (0, 1),
+        home: (0, 0)
+    }
 
-    m = folium.Map(location=[KUANTAN_HUB[1], KUANTAN_HUB[2]], zoom_start=8)
+    fig, ax = plt.subplots(figsize=(9, 6))
+    nx.draw(
+        G,
+        pos,
+        with_labels=True,
+        node_size=3000,
+        node_color="#AED6F1",
+        font_weight="bold",
+        ax=ax
+    )
 
-    # Markers
-    folium.Marker(
-        [PORT_KUANTAN[1], PORT_KUANTAN[2]],
-        popup="🚢 Port Kuantan",
-        icon=folium.Icon(color="blue", icon="ship", prefix="fa")
-    ).add_to(m)
+    labels = nx.get_edge_attributes(G, "weight")
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=labels, ax=ax)
 
-    folium.Marker(
-        [KUANTAN_HUB[1], KUANTAN_HUB[2]],
-        popup="🏭 Kuantan Hub",
-        icon=folium.Icon(color="green", icon="warehouse", prefix="fa")
-    ).add_to(m)
+    ax.set_title(f"🚚 Delivery Route for Order {order['Order ID']}")
+    ax.axis("off")
 
-    folium.Marker(
-        [home_lat, home_lon],
-        popup="🏠 Customer",
-        icon=folium.Icon(color="red", icon="home", prefix="fa")
-    ).add_to(m)
+    st.pyplot(fig)
 
-    # Routes
-    folium.PolyLine(
-        [(PORT_KUANTAN[1], PORT_KUANTAN[2]), (KUANTAN_HUB[1], KUANTAN_HUB[2])],
-        color="blue",
-        tooltip="Port → Hub"
-    ).add_to(m)
-
-    folium.PolyLine(
-        [(KUANTAN_HUB[1], KUANTAN_HUB[2]), (home_lat, home_lon)],
-        color="green",
-        tooltip="Hub → Customer"
-    ).add_to(m)
-
-    # 🚚 Vehicle icon (static)
-    folium.Marker(
-        [KUANTAN_HUB[1], KUANTAN_HUB[2]],
-        icon=folium.CustomIcon(
-            "https://cdn-icons-png.flaticon.com/512/1995/1995470.png",
-            icon_size=(40, 40)
-        )
-    ).add_to(m)
-
-    st_folium(m, width=900, height=500)
-
-    st.metric("⏱️ Estimated Delivery Time", f"{total_time:.2f} hours")
+    total_time = sum(labels.values())
+    st.metric("⏱️ Total Estimated Delivery Time", f"{total_time} Hours")
