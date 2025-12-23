@@ -62,9 +62,17 @@ with st.sidebar:
 # ==========================================
 # 2. HELPER FUNCTIONS
 # ==========================================
+
+def generate_barcode_img(text_data):
+    """Generates a barcode image in memory."""
+    code128 = barcode.get_barcode_class('code128')
+    rv = io.BytesIO()
+    code128(text_data, writer=ImageWriter()).write(rv)
+    return rv
+
 def decode_opencv(uploaded_image):
-    """Decodes barcode using OpenCV with version compatibility."""
-    # Reset file pointer to ensure we read from the start
+    """Decodes barcode using OpenCV (Robust Version)."""
+    # Reset file pointer
     uploaded_image.seek(0)
     
     file_bytes = np.asarray(bytearray(uploaded_image.read()), dtype=np.uint8)
@@ -76,20 +84,18 @@ def decode_opencv(uploaded_image):
     # Detect and Decode
     result = bardet.detectAndDecode(img)
     
-    # Initialize variables
     retval = False
     decoded_info = []
     
-    # Handle different OpenCV return signatures (3 vs 4 values)
+    # Handle different OpenCV versions (some return 3 items, some 4)
     if isinstance(result, tuple):
         if len(result) == 4:
             retval, decoded_info, decoded_type, points = result
         elif len(result) == 3:
             retval, decoded_info, points = result
     
-    # Return the first decoded barcode if found
+    # Return first barcode found
     if retval and decoded_info:
-        # decoded_info is a list of strings, return the first one
         return decoded_info[0]
         
     return None
@@ -97,7 +103,7 @@ def decode_opencv(uploaded_image):
 def determine_hub(region):
     """Assigns a hub based on region."""
     if pd.isna(region): return "General Hub (KL)"
-    region = region.strip()
+    region = str(region).strip()
     if region == 'Central': return "Central Hub (Shah Alam)"
     if region == 'North': return "Northern Hub (Ipoh)"
     if region == 'South': return "Southern Hub (Johor Bahru)"
@@ -129,7 +135,7 @@ with tab1:
         
         df = st.session_state['df_cust']
         # Dropdown to pick an order
-        options = df['Order ID'] + " | " + df['Customer Name']
+        options = df['Order ID'].astype(str) + " | " + df['Customer Name'].astype(str)
         selected_option = st.selectbox("Choose an Order:", options.head(50)) # Limit to 50 for speed
         
         if st.button("Confirm Purchase"):
@@ -169,7 +175,7 @@ with tab1:
                 else:
                     st.error("❌ Order ID not found in database.")
             else:
-                st.warning("⚠️ Could not read barcode.")
+                st.warning("⚠️ Could not read barcode. Ensure image is clear.")
 
 # --- TAB 2: LOGISTICS TREE DIAGRAM (c) & (d) ---
 with tab2:
@@ -229,7 +235,6 @@ with tab2:
         # Postcode Validation (Bonus Check)
         pc_df = st.session_state['df_post']
         if pd.notna(order_data['Postal Code']):
-            # Clean and check postcode
             try:
                 code_to_check = int(order_data['Postal Code'])
                 # Assuming Postcode is in the 1st column of the helper CSV
