@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import cv2
 import numpy as np
 from PIL import Image
-from pyzbar.pyzbar import decode
+# REMOVED: from pyzbar.pyzbar import decode (This was causing the crash)
 import barcode
 from barcode.writer import ImageWriter
 import io
@@ -54,14 +54,20 @@ def generate_barcode_image(order_id):
     return rv
 
 def scan_barcode_from_image(uploaded_image):
-    """Decodes barcode from an uploaded image file using pyzbar/opencv."""
+    """Decodes barcode using OpenCV (No external drivers needed)."""
     file_bytes = np.asarray(bytearray(uploaded_image.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
     
-    # Attempt decoding
-    decoded_objects = decode(img)
-    if decoded_objects:
-        return decoded_objects[0].data.decode("utf-8")
+    # Initialize OpenCV Barcode Detector
+    bardet = cv2.barcode_BarcodeDetector()
+    
+    # Detect and Decode
+    retval, decoded_info, decoded_type, points = bardet.detectAndDecode(img)
+    
+    if retval:
+        # decoded_info is a list of strings, we return the first one
+        return decoded_info[0]
+        
     return None
 
 def get_hub_from_region(region):
