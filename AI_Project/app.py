@@ -14,6 +14,7 @@ import io
 # ==========================================
 st.set_page_config(page_title="SmartTrack Logistics", layout="wide", page_icon="📦")
 
+# Initialize session state
 if 'df_cust' not in st.session_state:
     st.session_state['df_cust'] = None
 if 'df_post' not in st.session_state:
@@ -21,6 +22,7 @@ if 'df_post' not in st.session_state:
 if 'tracked_order' not in st.session_state:
     st.session_state['tracked_order'] = None
 
+# Custom CSS
 st.markdown("""
 <style>
     .header-style {font-size:24px; font-weight:bold; color:#2E86C1;}
@@ -56,38 +58,42 @@ with st.sidebar:
     st.caption("Group Project BSD3513")
 
 # ==========================================
-# 2. HELPER FUNCTIONS (CRASH-PROOF VERSION)
+# 2. HELPER FUNCTIONS (CRASH-PROOF)
 # ==========================================
 
 def generate_barcode_img(text_data):
     """Generates a high-contrast barcode image."""
     code128 = barcode.get_barcode_class('code128')
     rv = io.BytesIO()
-    # Write with options to ensure good size and quiet zone (white border)
     options = {"module_width": 0.4, "module_height": 15, "quiet_zone": 10}
     code128(text_data, writer=ImageWriter()).write(rv, options=options)
     return rv
 
 def safe_detect(detector, img):
-    """Helper to handle 3-value vs 4-value returns from OpenCV."""
+    """
+    Helper to safely handle OpenCV return values.
+    Some versions return 3 values, others return 4.
+    This function checks length before unpacking.
+    """
     result = detector.detectAndDecode(img)
     
     retval = False
     decoded_info = []
     
-    # Check return length safely
+    # Check if result is valid tuple
     if isinstance(result, tuple):
         if len(result) == 4:
             retval, decoded_info, decoded_type, points = result
         elif len(result) == 3:
             retval, decoded_info, points = result
-            
+    
+    # Return first barcode if found
     if retval and decoded_info:
         return decoded_info[0]
     return None
 
 def decode_opencv_robust(uploaded_image):
-    """Tries multiple image processing techniques to read the barcode safely."""
+    """Tries multiple image processing techniques to read the barcode."""
     uploaded_image.seek(0)
     file_bytes = np.asarray(bytearray(uploaded_image.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
@@ -103,12 +109,12 @@ def decode_opencv_robust(uploaded_image):
     code = safe_detect(detector, gray)
     if code: return code
     
-    # --- Attempt 3: Thresholding (High Contrast) ---
+    # --- Attempt 3: Thresholding ---
     _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
     code = safe_detect(detector, thresh)
     if code: return code
 
-    # --- Attempt 4: Zoom/Scale Up (Helps with small images) ---
+    # --- Attempt 4: Zoom/Scale Up ---
     scaled = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
     code = safe_detect(detector, scaled)
     if code: return code
@@ -156,7 +162,7 @@ with tab1:
         track_file = st.file_uploader("Upload Barcode Image", type=['png', 'jpg', 'jpeg'], key="tracker")
         
         if track_file:
-            # Use the new Crash-Proof Decoder
+            # Use the robust decoder
             scanned_code = decode_opencv_robust(track_file)
             
             if scanned_code:
@@ -172,7 +178,7 @@ with tab1:
                 else:
                     st.error("❌ ID not found in database.")
             else:
-                st.warning("⚠️ Still could not read. Try cropping the white border slightly.")
+                st.warning("⚠️ Could not read barcode. Try cropping the white border slightly.")
 
 # --- TAB 2 ---
 with tab2:
@@ -211,9 +217,6 @@ with tab2:
         
         st.divider()
         st.metric(label="⏱️ Total Estimated Arrival Time", value=f"{t1 + t2 + t3} Hours")
-    else:
-        st.info("ℹ️ No active order. Scan a barcode in Page 1 first.")
-        st.divider()
-        st.metric(label="⏱️ Total Estimated Arrival Time", value=f"{t1 + t2 + t3} Hours")
+        
     else:
         st.info("ℹ️ No active order. Scan a barcode in Page 1 first.")
