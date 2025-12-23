@@ -1,22 +1,27 @@
 import streamlit as st
-import cv2
-import numpy as np
 import pandas as pd
 import networkx as nx
 import matplotlib.pyplot as plt
-from pyzbar.pyzbar import decode
+import cv2
+import numpy as np
 from PIL import Image
+from pyzbar.pyzbar import decode
+import barcode
+from barcode.writer import ImageWriter
+import io
 
 # ==========================================
-# CONFIGURATION
+# 0. PAGE CONFIGURATION
 # ==========================================
-st.set_page_config(page_title="Smart Logistics AI", layout="wide", page_icon="🚚")
+st.set_page_config(page_title="SmartTrack Logistics", layout="wide", page_icon="📦")
 
-# Custom CSS for a professional look
+# Custom CSS for styling
 st.markdown("""
 <style>
-    .main-header {font-size:36px; font-weight:bold; color:#2E86C1;}
-    .metric-box {background-color:#F0F2F6; padding:15px; border-radius:10px; border-left: 5px solid #2E86C1;}
+    .main-header {font-size:32px; font-weight:bold; color:#1E88E5;}
+    .status-box {padding:15px; border-radius:10px; color:white; font-weight:bold; text-align:center;}
+    .delivering {background-color: #28B463;} /* Green */
+    .processing {background-color: #F1C40F; color:black;} /* Yellow */
 </style>
 """, unsafe_allow_html=True)
 
@@ -24,212 +29,218 @@ st.markdown("""
 # 1. DATA LOADING MODULE
 # ==========================================
 @st.cache_data
-def load_database():
-    """
-    Loads the Customer.csv file to act as the Parcel Database.
-    """
+def load_data():
+    # Load Main Customer Data
     try:
-        df = pd.read_csv("Customer.csv")
-        # Clean City names (remove trailing tabs/spaces found in your data)
-        df['City'] = df['City'].str.strip()
-        df['State'] = df['State'].str.strip()
-        return df
+        df_cust = pd.read_csv("Customer.csv")
+        # Load Helper Postcode Data
+        df_post = pd.read_csv("Malaysia_Postcode-postcodes.csv")
+        return df_cust, df_post
     except FileNotFoundError:
-        st.error("❌ 'Customer.csv' not found. Please upload the dataset.")
-        return pd.DataFrame()
-
-# ==========================================
-# 2. GRAPH & SEARCH ALGORITHM MODULE
-# ==========================================
-def build_malaysia_logistics_graph():
-    """
-    Constructs a graph representing Malaysian Logistics Network.
-    Nodes = Cities/States from your dataset.
-    Edges = Simulated Roads/Flights with Cost (RM) and Time (Hrs).
-    """
-    G = nx.Graph()
-
-    # Define major logistics hubs & connections (Simulated Data)
-    # Format: (Node1, Node2, Cost_RM, Time_Hrs)
-    
-    # Central Region (Hub: Port Klang)
-    routes = [
-        ("Port Klang", "Shah Alam", 5, 0.5),
-        ("Port Klang", "Kuala Lumpur", 10, 1.0),
-        ("Port Klang", "Putrajaya", 15, 1.2),
-        ("Shah Alam", "Petaling Jaya", 5, 0.4),
-        ("Kuala Lumpur", "Petaling Jaya", 4, 0.3),
-        ("Kuala Lumpur", "Ampang", 5, 0.5),
-        
-        # Northern Region
-        ("Kuala Lumpur", "Ipoh", 40, 2.5),
-        ("Ipoh", "Taiping", 20, 1.0),
-        ("Ipoh", "Pulau Pinang", 35, 2.0),
-        ("Pulau Pinang", "Alor Setar", 30, 1.5),
-        ("Alor Setar", "Kangar", 15, 1.0),
-        
-        # Southern Region
-        ("Putrajaya", "Seremban", 20, 1.0),
-        ("Seremban", "Melaka", 30, 1.5),
-        ("Melaka", "Muar", 25, 1.2),
-        ("Muar", "Batu Pahat", 20, 1.0),
-        ("Batu Pahat", "Johor Bahru", 35, 1.5),
-        ("Johor Bahru", "Pasir Gudang", 10, 0.5),
-        ("Johor Bahru", "Kota Tinggi", 15, 1.0),
-        
-        # East Coast
-        ("Kuala Lumpur", "Kuantan", 60, 3.5),
-        ("Kuantan", "Kuala Terengganu", 50, 2.5),
-        ("Kuala Terengganu", "Kota Bharu", 45, 2.5),
-        
-        # East Malaysia (High Cost/Time due to flight/sea)
-        ("Port Klang", "Kuching", 300, 24), # Ship/Flight
-        ("Kuching", "Sibu", 50, 3.0),
-        ("Sibu", "Bintulu", 60, 3.5),
-        ("Bintulu", "Miri", 55, 3.0),
-        ("Port Klang", "Kota Kinabalu", 350, 26),
-        ("Kota Kinabalu", "Sandakan", 70, 5.0),
-        ("Kota Kinabalu", "Tawau", 80, 6.0),
-        ("Kota Kinabalu", "Keningau", 40, 2.5)
-    ]
-
-    for u, v, c, t in routes:
-        G.add_edge(u, v, cost=c, time=t)
-
-    return G
-
-def find_optimal_route(G, start, end, mode):
-    """
-    Implements Dijkstra's Algorithm to find the shortest path.
-    """
-    weight_attr = 'cost' if mode == 'Lowest Cost (RM)' else 'time'
-    
-    try:
-        path = nx.dijkstra_path(G, start, end, weight=weight_attr)
-        cost = nx.dijkstra_path_length(G, start, end, weight=weight_attr)
-        return path, cost
-    except (nx.NetworkXNoPath, nx.NodeNotFound):
+        st.error("❌ Database files not found. Please upload 'Customer.csv' and 'Malaysia_Postcode-postcodes.csv'.")
         return None, None
 
+df_customers, df_postcodes = load_data()
+
 # ==========================================
-# 3. UI LAYOUT
+# 2. HELPER FUNCTIONS (Barcode & Vision)
 # ==========================================
-st.markdown('<p class="main-header">📦 Smart Parcel Routing System</p>', unsafe_allow_html=True)
-st.write("### AI-Powered Logistics: Scan, Decode, and Optimize.")
 
-# Sidebar Settings
-st.sidebar.header("⚙️ Settings")
-optimization_mode = st.sidebar.radio("Optimization Criteria:", ["Lowest Cost (RM)", "Fastest Time (Hours)"])
-st.sidebar.info("This system uses **Computer Vision** to extract addresses from barcodes and **Dijkstra's Algorithm** to calculate optimal routes.")
+def generate_barcode_image(order_id):
+    """Generates a barcode image in memory for the user to download."""
+    code128 = barcode.get_barcode_class('code128')
+    rv = io.BytesIO()
+    code128(order_id, writer=ImageWriter()).write(rv)
+    return rv
 
-# Create Tabs
-tab1, tab2 = st.tabs(["📲 1. Scan Parcel", "🗺️ 2. Route Optimization"])
+def scan_barcode_from_image(uploaded_image):
+    """Decodes barcode from an uploaded image file using pyzbar/opencv."""
+    file_bytes = np.asarray(bytearray(uploaded_image.read()), dtype=np.uint8)
+    img = cv2.imdecode(file_bytes, 1)
+    
+    # Attempt decoding
+    decoded_objects = decode(img)
+    if decoded_objects:
+        return decoded_objects[0].data.decode("utf-8")
+    return None
 
-# --- TAB 1: SCANNING ---
-with tab1:
-    col1, col2 = st.columns([1, 1])
+def get_hub_from_region(region):
+    """Simple logic to assign a Regional Hub based on dataset Region."""
+    if region == 'Central': return "Central Hub (Shah Alam)"
+    if region == 'North': return "Northern Hub (Ipoh)"
+    if region == 'South': return "Southern Hub (Johor Bahru)"
+    if region == 'East': return "East Coast Hub (Kuantan)"
+    return "International Hub (KLIA)"
+
+# ==========================================
+# 3. GUI PAGE 1: CUSTOMER PORTAL
+# ==========================================
+
+st.markdown('<p class="main-header">📦 Smart Parcel System</p>', unsafe_allow_html=True)
+
+# We use tabs to separate the "Purchase" phase from the "Tracking" phase on Page 1
+tab_buy, tab_track = st.tabs(["🛒 Step 1: Buy & Generate Barcode", "🔍 Step 2: Track Parcel"])
+
+with tab_buy:
+    st.subheader("(a) Customer Purchase Simulation")
+    st.info("Select a customer order to simulate a purchase. This will generate your unique tracking barcode.")
     
-    with col1:
-        st.subheader("Upload Barcode Image")
-        uploaded_file = st.file_uploader("Upload a parcel image...", type=['png', 'jpg', 'jpeg'])
-    
-    scan_result = None
-    
-    if uploaded_file is not None:
-        # 1. Process Image
-        image = Image.open(uploaded_file)
-        img_array = np.array(image)
+    if df_customers is not None:
+        # User selects an order
+        sample_orders = df_customers.sample(20) # Limit to 20 for dropdown speed
+        selected_order_row = st.selectbox(
+            "Select Your Order:", 
+            sample_orders['Order ID'] + " - " + sample_orders['Customer Name']
+        )
         
-        with col1:
-            st.image(image, caption="Uploaded Image", width=300)
-        
-        # 2. Decode Barcode
-        barcodes = decode(img_array)
-        
-        if barcodes:
-            scan_result = barcodes[0].data.decode("utf-8")
-            st.session_state['scanned_id'] = scan_result  # Store in session
+        if st.button("🛒 Buy & Generate Barcode"):
+            order_id = selected_order_row.split(" - ")[0]
             
-            with col2:
-                st.success("✅ **Barcode Detected!**")
-                st.markdown(f"<div class='metric-box'><h3>Order ID: {scan_result}</h3></div>", unsafe_allow_html=True)
+            # Generate Barcode
+            img_data = generate_barcode_image(order_id)
+            st.image(img_data, caption=f"Barcode for {order_id}", width=400)
+            
+            # Download Button
+            st.download_button(
+                label="📥 Download Barcode",
+                data=img_data,
+                file_name=f"barcode_{order_id}.png",
+                mime="image/png"
+            )
+            st.success(f"Purchase Confirmed! Save this barcode to track your package.")
+
+with tab_track:
+    st.subheader("(b) Check Parcel Status")
+    st.write("Upload your barcode to see where your parcel is.")
+    
+    uploaded_file = st.file_uploader("Upload Barcode Image", type=['png', 'jpg', 'jpeg'])
+    
+    if 'track_status' not in st.session_state:
+        st.session_state['track_status'] = None
+        st.session_state['order_details'] = None
+
+    if uploaded_file:
+        scanned_id = scan_barcode_from_image(uploaded_file)
+        
+        if scanned_id:
+            st.success(f"✅ Barcode Detected: {scanned_id}")
+            
+            # Search in Database
+            order_match = df_customers[df_customers['Order ID'] == scanned_id]
+            
+            if not order_match.empty:
+                details = order_match.iloc[0]
+                st.session_state['order_details'] = details
+                st.session_state['track_status'] = "Delivering" # Simulating active status
                 
-                # 3. Lookup in Database
-                df = load_database()
-                customer_info = df[df['Order ID'] == scan_result]
+                # Show Status UI
+                st.markdown(f"""
+                <div class="status-box delivering">
+                    STATUS: DELIVERING<br>
+                    Heading to: {details['City']}, {details['State']}
+                </div>
+                """, unsafe_allow_html=True)
                 
-                if not customer_info.empty:
-                    row = customer_info.iloc[0]
-                    st.write("---")
-                    st.write(f"**👤 Customer:** {row['Customer Name']}")
-                    st.write(f"**🏢 City:** {row['City']}")
-                    st.write(f"**📍 State:** {row['State']}")
-                    st.write(f"**📦 Product:** {row['Product Name']}")
-                    
-                    st.session_state['destination'] = row['City'] # Store destination
-                else:
-                    st.error("❌ Order ID not found in Customer Database.")
+                st.info("👉 Go to **Page 2 (Tree Diagram)** below to see the live delivery route!")
+            else:
+                st.error("❌ Order ID not found in system.")
         else:
-            st.error("⚠️ No barcode detected. Try a clearer image.")
+            st.warning("⚠️ Could not read barcode. Please try a clearer image.")
 
-# --- TAB 2: ROUTING ---
-with tab2:
-    st.subheader("🚀 Intelligent Route Planning")
+st.markdown("---")
+
+# ==========================================
+# 4. GUI PAGE 2: ROUTING & TREE DIAGRAM
+# ==========================================
+st.subheader("(c) Delivery Path Visualization")
+
+if st.session_state['track_status'] == "Delivering" and st.session_state['order_details'] is not None:
+    details = st.session_state['order_details']
     
-    start_node = "Port Klang"
-    end_node = st.session_state.get('destination', None)
+    # --- 4.1 BUILD TREE GRAPH ---
+    # Nodes: A (Port) -> B (Regional Hub) -> C (State Center) -> D (Home)
     
-    if end_node:
-        G = build_malaysia_logistics_graph()
+    start_node = "Port Klang (Main Hub)"
+    regional_node = get_hub_from_region(details.get('Region', 'Central'))
+    state_node = f"{details['State']} Distribution Center"
+    end_node = f"Home: {details['City']}\n({details['Customer Name']})"
+    
+    # Create Graph
+    G = nx.DiGraph() # Directed Graph for Flow
+    
+    # Add Edges with 'Weights' (Time in hours)
+    # Using simple logic: Farther regions = more time
+    time_1 = 4.0 # Port to Region
+    time_2 = 2.5 # Region to State
+    time_3 = 1.0 # State to Home
+    
+    G.add_edge(start_node, regional_node, weight=time_1)
+    G.add_edge(regional_node, state_node, weight=time_2)
+    G.add_edge(state_node, end_node, weight=time_3)
+    
+    # --- 4.2 DRAW TREE DIAGRAM ---
+    col_graph, col_info = st.columns([3, 1])
+    
+    with col_graph:
+        fig, ax = plt.subplots(figsize=(10, 6))
         
-        # Check if destination exists in our graph
-        if end_node not in G.nodes:
-            # Fallback logic: try to route to the State capital if City is missing
-            st.warning(f"⚠️ Direct route to '{end_node}' not mapped. Routing to nearest major hub.")
-            # Simple heuristic mapping for demo purposes
-            # (In a real app, you'd have a full coordinate mapping)
-            end_node = "Kuala Lumpur" # Default fallback
+        # Tree Layout (Hierarchical)
+        pos = {
+            start_node: (0, 10),
+            regional_node: (0, 7),
+            state_node: (0, 4),
+            end_node: (0, 1)
+        }
         
-        # Run Dijkstra
-        path, value = find_optimal_route(G, start_node, end_node, optimization_mode)
+        # Draw Nodes
+        nx.draw_networkx_nodes(G, pos, node_size=3000, node_color='#85C1E9', node_shape='s', ax=ax)
+        # Draw Edges
+        nx.draw_networkx_edges(G, pos, width=3, edge_color='#2E86C1', arrowstyle='->', arrowsize=20, ax=ax)
+        # Draw Labels
+        nx.draw_networkx_labels(G, pos, font_size=9, font_weight='bold', ax=ax)
         
-        if path:
-            c1, c2 = st.columns([3, 1])
-            
-            with c1:
-                # Visualize Graph
-                fig, ax = plt.subplots(figsize=(10, 6))
-                pos = nx.kamada_kawai_layout(G)
-                
-                # Draw Base Graph
-                nx.draw(G, pos, with_labels=True, node_color='lightgrey', node_size=500, font_size=8, edge_color='grey', alpha=0.5, ax=ax)
-                
-                # Highlight Path
-                path_edges = list(zip(path, path[1:]))
-                nx.draw_networkx_nodes(G, pos, nodelist=path, node_color='#2E86C1', node_size=700, ax=ax)
-                nx.draw_networkx_edges(G, pos, edgelist=path_edges, edge_color='#E74C3C', width=3, ax=ax)
-                
-                st.pyplot(fig)
-            
-            with c2:
-                st.markdown("### 🏁 Route Details")
-                st.write(f"**Start:** {start_node}")
-                st.write(f"**End:** {end_node}")
-                
-                unit = "RM" if "Cost" in optimization_mode else "Hours"
-                st.metric(label=f"Total {optimization_mode}", value=f"{value} {unit}")
-                
-                st.write("**Stops:**")
-                for i, stop in enumerate(path):
-                    st.code(f"{i+1}. {stop}")
+        # Draw Edge Labels (Time)
+        edge_labels = {
+            (start_node, regional_node): f"{time_1} Hrs",
+            (regional_node, state_node): f"{time_2} Hrs",
+            (state_node, end_node): f"{time_3} Hrs"
+        }
+        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_color='red', ax=ax)
+        
+        ax.set_title(f"Delivery Route for Order #{details['Order ID']}", fontsize=14)
+        ax.axis('off')
+        st.pyplot(fig)
+
+    # --- 4.3 ESTIMATION (d) ---
+    with col_info:
+        st.markdown("### ⏱️ Estimation")
+        total_time = time_1 + time_2 + time_3
+        st.metric(label="Total Estimated Arrival", value=f"{total_time} Hours")
+        
+        st.write("**Path Details:**")
+        st.write(f"1. 🚢 {start_node}")
+        st.write("   ↓")
+        st.write(f"2. 🏭 {regional_node}")
+        st.write("   ↓")
+        st.write(f"3. 🚚 {state_node}")
+        st.write("   ↓")
+        st.write(f"4. 🏠 {end_node}")
+        
+        # Validate with Helper Dataset (Postcode)
+        # Check if the postcode exists in the helper file
+        pc = int(details['Postal Code']) if pd.notnull(details['Postal Code']) else 0
+        valid_zone = df_postcodes[df_postcodes.iloc[:, 0] == pc] # Assuming Col 0 is postcode
+        
+        if not valid_zone.empty:
+            st.success("✅ Postcode Verified in Malaysia Database")
         else:
-            st.error(f"Could not find a path to {end_node}")
-            
-    else:
-        st.info("👈 Please scan a parcel in Tab 1 first.")
+            st.caption(f"ℹ️ Postcode {pc} routed via standard maps.")
+
+else:
+    st.info("Waiting for barcode scan... Please track a parcel in Step 2 above.")
 
 # ==========================================
 # ESG FOOTER
 # ==========================================
-st.write("---")
-st.write("**🌱 ESG Impact:** Optimizing delivery routes reduces fuel consumption and carbon footprint (Environment) while ensuring timely essential deliveries (Social).")
+st.markdown("---")
+st.caption("🌱 **ESG Note:** Optimized tree routing reduces unnecessary mileage between distribution centers, lowering carbon emissions.")
