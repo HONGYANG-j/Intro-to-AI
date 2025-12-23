@@ -14,7 +14,6 @@ import io
 # ==========================================
 st.set_page_config(page_title="SmartTrack Logistics", layout="wide", page_icon="📦")
 
-# Initialize session state for data persistence
 if 'df_cust' not in st.session_state:
     st.session_state['df_cust'] = None
 if 'df_post' not in st.session_state:
@@ -22,7 +21,6 @@ if 'df_post' not in st.session_state:
 if 'tracked_order' not in st.session_state:
     st.session_state['tracked_order'] = None
 
-# Custom CSS
 st.markdown("""
 <style>
     .header-style {font-size:24px; font-weight:bold; color:#2E86C1;}
@@ -32,76 +30,74 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. SIDEBAR: SYSTEM SETUP (UPLOAD DATASETS)
+# 1. SIDEBAR: SYSTEM SETUP
 # ==========================================
 with st.sidebar:
     st.header("⚙️ 1. System Setup")
-    st.info("Upload the required databases to start the system.")
+    st.info("Upload the required databases to start.")
     
-    # Dataset 1: Customer Database
     cust_file = st.file_uploader("Upload 'Customer.csv'", type=['csv'])
     if cust_file:
         try:
             st.session_state['df_cust'] = pd.read_csv(cust_file)
             st.success("✅ Customer DB Loaded")
         except Exception as e:
-            st.error(f"Error loading CSV: {e}")
+            st.error(f"Error: {e}")
 
-    # Dataset 2: Postcode Database
     post_file = st.file_uploader("Upload 'Malaysia_Postcode...csv'", type=['csv'])
     if post_file:
         try:
             st.session_state['df_post'] = pd.read_csv(post_file)
             st.success("✅ Postcode DB Loaded")
         except Exception as e:
-            st.error(f"Error loading CSV: {e}")
+            st.error(f"Error: {e}")
             
     st.divider()
     st.caption("Group Project BSD3513")
 
 # ==========================================
-# 2. HELPER FUNCTIONS
+# 2. HELPER FUNCTIONS (ROBUST VERSION)
 # ==========================================
 
 def generate_barcode_img(text_data):
-    """Generates a barcode image in memory."""
+    """Generates a high-contrast barcode image."""
     code128 = barcode.get_barcode_class('code128')
     rv = io.BytesIO()
-    code128(text_data, writer=ImageWriter()).write(rv)
+    # Write with options to ensure good size and quiet zone (white border)
+    options = {"module_width": 0.4, "module_height": 15, "quiet_zone": 10}
+    code128(text_data, writer=ImageWriter()).write(rv, options=options)
     return rv
 
-def decode_opencv(uploaded_image):
-    """Decodes barcode using OpenCV (Robust Version)."""
-    # Reset file pointer
+def decode_opencv_robust(uploaded_image):
+    """Tries multiple image processing techniques to read the barcode."""
     uploaded_image.seek(0)
-    
     file_bytes = np.asarray(bytearray(uploaded_image.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
     
-    # Initialize OpenCV Barcode Detector
-    bardet = cv2.barcode_BarcodeDetector()
+    detector = cv2.barcode_BarcodeDetector()
     
-    # Detect and Decode
-    result = bardet.detectAndDecode(img)
+    # --- Attempt 1: Raw Image ---
+    retval, decoded_info, _, _ = detector.detectAndDecode(img)
+    if retval and decoded_info: return decoded_info[0]
     
-    retval = False
-    decoded_info = []
+    # --- Attempt 2: Grayscale ---
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    retval, decoded_info, _, _ = detector.detectAndDecode(gray)
+    if retval and decoded_info: return decoded_info[0]
     
-    # Handle different OpenCV versions (some return 3 items, some 4)
-    if isinstance(result, tuple):
-        if len(result) == 4:
-            retval, decoded_info, decoded_type, points = result
-        elif len(result) == 3:
-            retval, decoded_info, points = result
-    
-    # Return first barcode found
-    if retval and decoded_info:
-        return decoded_info[0]
-        
+    # --- Attempt 3: Thresholding (High Contrast) ---
+    _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
+    retval, decoded_info, _, _ = detector.detectAndDecode(thresh)
+    if retval and decoded_info: return decoded_info[0]
+
+    # --- Attempt 4: Zoom/Scale Up (Helps with small images) ---
+    scaled = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+    retval, decoded_info, _, _ = detector.detectAndDecode(scaled)
+    if retval and decoded_info: return decoded_info[0]
+
     return None
 
 def determine_hub(region):
-    """Assigns a hub based on region."""
     if pd.isna(region): return "General Hub (KL)"
     region = str(region).strip()
     if region == 'Central': return "Central Hub (Shah Alam)"
@@ -114,108 +110,76 @@ def determine_hub(region):
 # 3. MAIN INTERFACE
 # ==========================================
 
-# Check if data is loaded
 if st.session_state['df_cust'] is None or st.session_state['df_post'] is None:
-    st.warning("⚠️ Please upload BOTH datasets in the sidebar to proceed.")
-    st.stop() # Stop execution here until files are uploaded
+    st.warning("⚠️ Please upload BOTH datasets in the sidebar first.")
+    st.stop()
 
-# Main Tabs
 tab1, tab2 = st.tabs(["🛒 Page 1: Buy & Track", "🌳 Page 2: Logistics Tree Diagram"])
 
-# --- TAB 1: CUSTOMER PORTAL (Buy & Track) ---
+# --- TAB 1 ---
 with tab1:
     st.markdown('<p class="header-style">Customer Portal</p>', unsafe_allow_html=True)
-    
     col_buy, col_track = st.columns(2)
     
-    # (a) BUY & GENERATE BARCODE
     with col_buy:
         st.markdown('<div class="info-box">🛒 <b>Step A: Buy Item</b></div>', unsafe_allow_html=True)
-        st.write("Simulate a purchase to generate a tracking code.")
-        
         df = st.session_state['df_cust']
-        # Dropdown to pick an order
         options = df['Order ID'].astype(str) + " | " + df['Customer Name'].astype(str)
-        selected_option = st.selectbox("Choose an Order:", options.head(50)) # Limit to 50 for speed
+        selected_option = st.selectbox("Choose an Order:", options.head(50))
         
         if st.button("Confirm Purchase"):
             order_id = selected_option.split(" | ")[0]
-            
-            # Generate Barcode
             img_data = generate_barcode_img(order_id)
             st.image(img_data, caption=f"Tracking ID: {order_id}")
-            
-            # Download
             st.download_button("📥 Download Barcode", img_data, f"{order_id}.png", "image/png")
     
-    # (b) UPLOAD & TRACK STATUS
     with col_track:
         st.markdown('<div class="info-box">🔍 <b>Step B: Track Status</b></div>', unsafe_allow_html=True)
-        st.write("Upload your barcode to check delivery status.")
-        
         track_file = st.file_uploader("Upload Barcode Image", type=['png', 'jpg', 'jpeg'], key="tracker")
         
         if track_file:
-            scanned_code = decode_opencv(track_file)
+            # Use the new Robust Decoder
+            scanned_code = decode_opencv_robust(track_file)
             
             if scanned_code:
                 st.success(f"✅ Code Scanned: {scanned_code}")
-                
-                # Find Order in DB
                 record = df[df['Order ID'] == scanned_code]
-                
                 if not record.empty:
                     data = record.iloc[0]
-                    st.session_state['tracked_order'] = data # Save for Page 2
-                    
+                    st.session_state['tracked_order'] = data
                     st.write(f"**Status:** 🚚 Delivering")
                     st.write(f"**Customer:** {data['Customer Name']}")
                     st.write(f"**Destination:** {data['City']}, {data['State']}")
-                    st.info("👉 Check 'Page 2' tab for the delivery route tree!")
+                    st.info("👉 Check 'Page 2' tab for the route!")
                 else:
-                    st.error("❌ Order ID not found in database.")
+                    st.error("❌ ID not found in database.")
             else:
-                st.warning("⚠️ Could not read barcode. Ensure image is clear.")
+                st.warning("⚠️ Still could not read. Try cropping the white border slightly.")
 
-# --- TAB 2: LOGISTICS TREE DIAGRAM (c) & (d) ---
+# --- TAB 2 ---
 with tab2:
     st.markdown('<p class="header-style">Logistics Route Visualization</p>', unsafe_allow_html=True)
-    
     order_data = st.session_state['tracked_order']
     
     if order_data is not None:
-        # Define Nodes for (c) Tree Diagram
         node_A = "Port Klang (Start)"
-        node_B = determine_hub(order_data['Region']) # Regional Hub
+        node_B = determine_hub(order_data['Region'])
         node_C = f"{order_data['State']} Dist. Center"
         node_D = f"Home: {order_data['City']}"
         
-        # Build Directed Graph
         G = nx.DiGraph()
-        
-        # Define Weights (Estimated Time in Hours)
-        t1, t2, t3 = 4.5, 2.0, 1.0 # Static estimates for demo
-        
+        t1, t2, t3 = 4.5, 2.0, 1.0
         G.add_edge(node_A, node_B, weight=t1)
         G.add_edge(node_B, node_C, weight=t2)
         G.add_edge(node_C, node_D, weight=t3)
         
-        # Layout & Drawing
-        pos = {
-            node_A: (0, 4),
-            node_B: (0, 3),
-            node_C: (0, 2),
-            node_D: (0, 1)
-        }
+        pos = {node_A: (0, 4), node_B: (0, 3), node_C: (0, 2), node_D: (0, 1)}
         
         fig, ax = plt.subplots(figsize=(8, 6))
-        
-        # Draw Tree
         nx.draw_networkx_nodes(G, pos, node_size=2500, node_color='#AED6F1', node_shape='s', ax=ax)
         nx.draw_networkx_edges(G, pos, width=2, edge_color='#2874A6', arrowsize=20, ax=ax)
         nx.draw_networkx_labels(G, pos, font_size=10, font_weight="bold", ax=ax)
         
-        # Draw Edge Labels (Time)
         edge_labels = {
             (node_A, node_B): f"{t1} Hrs",
             (node_B, node_C): f"{t2} Hrs",
@@ -227,24 +191,7 @@ with tab2:
         ax.axis('off')
         st.pyplot(fig)
         
-        # (d) ESTIMATION DISPLAY
         st.divider()
-        total_time = t1 + t2 + t3
-        st.metric(label="⏱️ Total Estimated Arrival Time", value=f"{total_time} Hours")
-        
-        # Postcode Validation (Bonus Check)
-        pc_df = st.session_state['df_post']
-        if pd.notna(order_data['Postal Code']):
-            try:
-                code_to_check = int(order_data['Postal Code'])
-                # Assuming Postcode is in the 1st column of the helper CSV
-                valid = pc_df[pc_df.iloc[:, 0] == code_to_check]
-                if not valid.empty:
-                    st.caption("✅ Verified via Malaysia Postcode Database")
-                else:
-                    st.caption("ℹ️ Standard routing applied (Postcode not in local DB)")
-            except:
-                pass
-                
+        st.metric(label="⏱️ Total Estimated Arrival Time", value=f"{t1 + t2 + t3} Hours")
     else:
-        st.info("ℹ️ No active order. Please go to 'Page 1', scan a barcode, and verify an order first.")
+        st.info("ℹ️ No active order. Scan a barcode in Page 1 first.")
