@@ -4,7 +4,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageEnhance
 import barcode
 from barcode.writer import ImageWriter
 import io
@@ -22,7 +22,6 @@ if 'df_post' not in st.session_state:
 if 'tracked_order' not in st.session_state:
     st.session_state['tracked_order'] = None
 
-# Custom CSS
 st.markdown("""
 <style>
     .header-style {font-size:24px; font-weight:bold; color:#2E86C1;}
@@ -58,23 +57,28 @@ with st.sidebar:
     st.caption("Group Project BSD3513")
 
 # ==========================================
-# 2. HELPER FUNCTIONS (ENHANCED & ROBUST)
+# 2. HELPER FUNCTIONS (HIGH RES & SHARPENING)
 # ==========================================
 
 def generate_barcode_img(text_data):
-    """Generates a barcode with standard width."""
+    """Generates a FAT, HIGH-CONTRAST barcode."""
     code128 = barcode.get_barcode_class('code128')
     rv = io.BytesIO()
-    # Tweaked width to 0.3 for better readability
-    options = {"module_width": 0.3, "module_height": 10, "quiet_zone": 10}
+    
+    # CRITICAL FIX: module_width=0.5 makes bars thicker. quiet_zone=20 adds white space.
+    options = {
+        "module_width": 0.5, 
+        "module_height": 15, 
+        "quiet_zone": 20, 
+        "background": "white", 
+        "foreground": "black"
+    }
+    
     code128(text_data, writer=ImageWriter()).write(rv, options=options)
     return rv
 
 def safe_detect(detector, img):
-    """
-    Helper to safely handle OpenCV return values.
-    Checks length before unpacking to prevent crashes.
-    """
+    """Helper to safely handle OpenCV return values (3 vs 4 items)."""
     result = detector.detectAndDecode(img)
     
     retval = False
@@ -87,28 +91,29 @@ def safe_detect(detector, img):
             retval, decoded_info, points = result
     
     if retval and decoded_info:
-        return decoded_info[0]
+        # Filter out empty strings
+        valid_codes = [x for x in decoded_info if x]
+        if valid_codes:
+            return valid_codes[0]
     return None
 
 def decode_opencv_robust(uploaded_image):
     """
-    Super Robust Decoder:
-    1. Fixes transparency (Alpha Channel) issues.
-    2. Tries 5 different image processing techniques.
+    Decodes with Sharpening and Contrast enhancement.
     """
-    # 1. Load with PIL to handle transparency/formats correctly
+    # 1. Load with PIL to fix transparency
     image = Image.open(uploaded_image)
     
-    # 2. Convert to RGB (Force white background if transparent)
+    # 2. Force White Background
     if image.mode in ('RGBA', 'LA'):
         background = Image.new(image.mode[:-1], image.size, (255, 255, 255))
         background.paste(image, image.split()[-1])
         image = background
     image = image.convert('RGB')
     
-    # 3. Convert to OpenCV Format (numpy array)
+    # 3. Convert to OpenCV
     img = np.array(image)
-    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR) # OpenCV uses BGR
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     
     detector = cv2.barcode_BarcodeDetector()
     
@@ -121,19 +126,20 @@ def decode_opencv_robust(uploaded_image):
     code = safe_detect(detector, gray)
     if code: return code
     
-    # --- Attempt 3: Otsu Thresholding (High Contrast) ---
-    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # --- Attempt 3: Sharpening (New!) ---
+    kernel = np.array([[0, -1, 0], [-1, 5,-1], [0, -1, 0]])
+    sharpened = cv2.filter2D(gray, -1, kernel)
+    code = safe_detect(detector, sharpened)
+    if code: return code
+    
+    # --- Attempt 4: Binary Threshold (Extreme Contrast) ---
+    _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
     code = safe_detect(detector, thresh)
     if code: return code
-
-    # --- Attempt 4: Zoom In (2x) ---
+    
+    # --- Attempt 5: Zoom In (2x) ---
     zoomed = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
     code = safe_detect(detector, zoomed)
-    if code: return code
-
-    # --- Attempt 5: Zoom Out (0.5x - Helps if barcode is too big) ---
-    shrunk = cv2.resize(gray, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
-    code = safe_detect(detector, shrunk)
     if code: return code
 
     return None
@@ -170,8 +176,9 @@ with tab1:
         
         if st.button("Confirm Purchase"):
             order_id = selected_option.split(" | ")[0]
+            # Use new FAT barcode generator
             img_data = generate_barcode_img(order_id)
-            st.image(img_data, caption=f"Tracking ID: {order_id}")
+            st.image(img_data, caption=f"Tracking ID: {order_id} (High Res)")
             st.download_button("📥 Download Barcode", img_data, f"{order_id}.png", "image/png")
     
     with col_track:
@@ -179,7 +186,6 @@ with tab1:
         track_file = st.file_uploader("Upload Barcode Image", type=['png', 'jpg', 'jpeg'], key="tracker")
         
         if track_file:
-            # Use the SUPER robust decoder
             scanned_code = decode_opencv_robust(track_file)
             
             if scanned_code:
@@ -195,7 +201,7 @@ with tab1:
                 else:
                     st.error("❌ ID not found in database.")
             else:
-                st.warning("⚠️ Still cannot read. Try re-generating the barcode.")
+                st.warning("⚠️ Still reading... Try downloading the barcode again (it is now generated larger).")
 
 # --- TAB 2 ---
 with tab2:
