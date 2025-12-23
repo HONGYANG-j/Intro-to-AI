@@ -4,7 +4,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import cv2
 import numpy as np
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageOps
 import barcode
 from barcode.writer import ImageWriter
 import io
@@ -14,7 +14,6 @@ import io
 # ==========================================
 st.set_page_config(page_title="SmartTrack Logistics", layout="wide", page_icon="📦")
 
-# Initialize session state
 if 'df_cust' not in st.session_state:
     st.session_state['df_cust'] = None
 if 'df_post' not in st.session_state:
@@ -57,18 +56,18 @@ with st.sidebar:
     st.caption("Group Project BSD3513")
 
 # ==========================================
-# 2. HELPER FUNCTIONS (HIGH RES & SHARPENING)
+# 2. HELPER FUNCTIONS (ULTRA ROBUST)
 # ==========================================
 
 def generate_barcode_img(text_data):
-    """Generates a FAT, HIGH-CONTRAST barcode."""
+    """Generates a barcode optimized for OpenCV reading."""
     code128 = barcode.get_barcode_class('code128')
     rv = io.BytesIO()
     
-    # CRITICAL FIX: module_width=0.5 makes bars thicker. quiet_zone=20 adds white space.
+    # Large module width and high quiet zone for clarity
     options = {
         "module_width": 0.5, 
-        "module_height": 15, 
+        "module_height": 20, 
         "quiet_zone": 20, 
         "background": "white", 
         "foreground": "black"
@@ -78,69 +77,77 @@ def generate_barcode_img(text_data):
     return rv
 
 def safe_detect(detector, img):
-    """Helper to safely handle OpenCV return values (3 vs 4 items)."""
+    """Safely unpacks OpenCV results."""
     result = detector.detectAndDecode(img)
-    
-    retval = False
-    decoded_info = []
+    retval, decoded_info = False, []
     
     if isinstance(result, tuple):
         if len(result) == 4:
-            retval, decoded_info, decoded_type, points = result
+            retval, decoded_info, _, _ = result
         elif len(result) == 3:
-            retval, decoded_info, points = result
+            retval, decoded_info, _ = result
     
     if retval and decoded_info:
-        # Filter out empty strings
-        valid_codes = [x for x in decoded_info if x]
-        if valid_codes:
-            return valid_codes[0]
+        # Return first non-empty string
+        for code in decoded_info:
+            if code: return code
     return None
 
 def decode_opencv_robust(uploaded_image):
     """
-    Decodes with Sharpening and Contrast enhancement.
+    Ultra-Robust Decoder.
+    Preprocessing pipeline: RGB -> Grayscale -> Thresholding -> Scaling
     """
-    # 1. Load with PIL to fix transparency
-    image = Image.open(uploaded_image)
-    
-    # 2. Force White Background
-    if image.mode in ('RGBA', 'LA'):
-        background = Image.new(image.mode[:-1], image.size, (255, 255, 255))
-        background.paste(image, image.split()[-1])
-        image = background
-    image = image.convert('RGB')
-    
-    # 3. Convert to OpenCV
+    # 1. Open with PIL
+    try:
+        image = Image.open(uploaded_image)
+    except:
+        return None
+
+    # 2. Handle Transparency (Alpha Channel) -> Force White Background
+    if image.mode in ('RGBA', 'LA') or (image.mode == 'P' and 'transparency' in image.info):
+        alpha = image.convert('RGBA').split()[-1]
+        bg = Image.new("RGB", image.size, (255, 255, 255))
+        bg.paste(image, mask=alpha)
+        image = bg
+    else:
+        image = image.convert('RGB')
+
+    # 3. Enhance Contrast
+    enhancer = ImageEnhance.Contrast(image)
+    image = enhancer.enhance(2.0) # Double contrast
+
+    # 4. Convert to OpenCV format (BGR)
     img = np.array(image)
     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     
     detector = cv2.barcode_BarcodeDetector()
+
+    # --- ATTEMPT SEQUENCE ---
     
-    # --- Attempt 1: Raw Image ---
-    code = safe_detect(detector, img)
-    if code: return code
-    
-    # --- Attempt 2: Grayscale ---
+    # 1. Normal
+    res = safe_detect(detector, img)
+    if res: return res
+
+    # 2. Grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    code = safe_detect(detector, gray)
-    if code: return code
+    res = safe_detect(detector, gray)
+    if res: return res
+
+    # 3. Binary Threshold (Pure Black & White)
+    _, thresh = cv2.threshold(gray, 120, 255, cv2.THRESH_BINARY)
+    res = safe_detect(detector, thresh)
+    if res: return res
+
+    # 4. Inverted (White bars on black background - sometimes helps)
+    inverted = cv2.bitwise_not(gray)
+    res = safe_detect(detector, inverted)
+    if res: return res
     
-    # --- Attempt 3: Sharpening (New!) ---
-    kernel = np.array([[0, -1, 0], [-1, 5,-1], [0, -1, 0]])
-    sharpened = cv2.filter2D(gray, -1, kernel)
-    code = safe_detect(detector, sharpened)
-    if code: return code
-    
-    # --- Attempt 4: Binary Threshold (Extreme Contrast) ---
-    _, thresh = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-    code = safe_detect(detector, thresh)
-    if code: return code
-    
-    # --- Attempt 5: Zoom In (2x) ---
+    # 5. Zoom In (2x)
     zoomed = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
-    code = safe_detect(detector, zoomed)
-    if code: return code
+    res = safe_detect(detector, zoomed)
+    if res: return res
 
     return None
 
@@ -176,9 +183,8 @@ with tab1:
         
         if st.button("Confirm Purchase"):
             order_id = selected_option.split(" | ")[0]
-            # Use new FAT barcode generator
             img_data = generate_barcode_img(order_id)
-            st.image(img_data, caption=f"Tracking ID: {order_id} (High Res)")
+            st.image(img_data, caption=f"Tracking ID: {order_id} (Enhanced)")
             st.download_button("📥 Download Barcode", img_data, f"{order_id}.png", "image/png")
     
     with col_track:
@@ -201,7 +207,7 @@ with tab1:
                 else:
                     st.error("❌ ID not found in database.")
             else:
-                st.warning("⚠️ Still reading... Try downloading the barcode again (it is now generated larger).")
+                st.warning("⚠️ Still unreadable. Try re-generating the barcode (Step A) and ensure the downloaded image is not modified.")
 
 # --- TAB 2 ---
 with tab2:
