@@ -1,8 +1,8 @@
 streamlit
 pandas
-numpy
+networkx
+matplotlib
 opencv-python-headless
+numpy
 pillow
 qrcode
-folium
-streamlit-folium
