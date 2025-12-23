@@ -60,7 +60,8 @@ def generate_barcode_img(text_data):
 
 
 def decode_barcode(uploaded_image):
-    """Reliable barcode decoding using OpenCV"""
+    """Version-safe barcode decoder for Streamlit Cloud"""
+
     try:
         image = Image.open(uploaded_image).convert("L")
     except:
@@ -68,14 +69,24 @@ def decode_barcode(uploaded_image):
 
     img = np.array(image)
 
-    # Binary threshold (important)
+    # Improve contrast
     _, img = cv2.threshold(img, 150, 255, cv2.THRESH_BINARY)
-
-    # Upscale image
     img = cv2.resize(img, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_CUBIC)
 
     detector = cv2.barcode_BarcodeDetector()
-    ok, decoded_info, _, _ = detector.detectAndDecode(img)
+
+    result = detector.detectAndDecode(img)
+
+    # Handle both OpenCV return formats safely
+    if isinstance(result, tuple):
+        if len(result) == 4:
+            ok, decoded_info, _, _ = result
+        elif len(result) == 3:
+            ok, decoded_info, _ = result
+        else:
+            return None
+    else:
+        return None
 
     if ok and decoded_info:
         for code in decoded_info:
@@ -83,6 +94,7 @@ def decode_barcode(uploaded_image):
                 return code.strip()
 
     return None
+
 
 
 def determine_hub(region):
