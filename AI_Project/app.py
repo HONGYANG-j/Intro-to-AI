@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
-import networkx as nx
-import matplotlib.pyplot as plt
+import folium
+from streamlit_folium import st_folium
+from math import radians, cos, sin, asin, sqrt
 import cv2
 import numpy as np
 from PIL import Image
@@ -11,6 +12,7 @@ import io
 # ==========================================
 # 0. PAGE CONFIGURATION & SESSION SETUP
 # ==========================================
+
 st.set_page_config(
     page_title="SmartTrack Logistics",
     layout="wide",
@@ -197,6 +199,26 @@ with tab1:
 # ==========================================
 # TAB 2 – LOGISTICS ROUTE
 # ==========================================
+PORT = ("Port Kuantan", 3.9767, 103.4242)
+HUBS = ("Kuantan Hub", 3.8168, 103.3317)
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371  # Earth radius (km)
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
+    return 2 * R * asin(sqrt(a))
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371  # Earth radius (km)
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
+    return 2 * R * asin(sqrt(a))
+
+
 with tab2:
     st.markdown(
         '<p class="header-style">Logistics Route Visualization</p>',
@@ -204,49 +226,78 @@ with tab2:
     )
 
     order = st.session_state.tracked_order
-
     if order is None:
         st.info("Scan a QR code in Page 1 first.")
         st.stop()
 
-    start = "Port Klang"
-    hub = determine_hub(order["Region"])
-    dc = f"{order['State']} Distribution Center"
-    home = f"Customer Home ({order['City']})"
+    # --- COORDINATES ---
+    port_name, port_lat, port_lon = PORT
 
-    G = nx.DiGraph()
-    G.add_edge(start, hub, weight=4.5)
-    G.add_edge(hub, dc, weight=2.0)
-    G.add_edge(dc, home, weight=1.0)
-
-    pos = {
-        start: (0, 3),
-        hub: (0, 2),
-        dc: (0, 1),
-        home: (0, 0)
-    }
-
-    fig, ax = plt.subplots(figsize=(8, 6))
-    nx.draw(
-        G,
-        pos,
-        with_labels=True,
-        node_size=2500,
-        node_color="#AED6F1",
-        font_weight="bold",
-        ax=ax
+    hub_name, hub_lat, hub_lon = HUBS.get(
+        order["Region"],
+        ("Kuantan Hub", 3.8168, 103.3317)
     )
 
-    labels = nx.get_edge_attributes(G, "weight")
-    nx.draw_networkx_edge_labels(G, pos, edge_labels=labels, ax=ax)
+    # Home location (example – replace later with dataset lat/lon)
+    home_lat, home_lon = hub_lat + 0.15, hub_lon + 0.15
 
-    ax.set_title(f"Delivery Route for Order {order['Order ID']}")
-    ax.axis("off")
+    # --- DISTANCES ---
+    d1 = haversine(port_lat, port_lon, hub_lat, hub_lon)
+    d2 = haversine(hub_lat, hub_lon, home_lat, home_lon)
 
-    st.pyplot(fig)
+    t1 = d1 / 80   # hours
+    t2 = d2 / 60
 
-    total_time = sum(labels.values())
+    total_time = t1 + t2
+
+    # --- MAP ---
+    m = folium.Map(location=[hub_lat, hub_lon], zoom_start=7)
+
+    # Markers
+    folium.Marker(
+        [port_lat, port_lon],
+        popup="🚢 Port Kuantan",
+        icon=folium.Icon(color="blue", icon="ship", prefix="fa")
+    ).add_to(m)
+
+    folium.Marker(
+        [hub_lat, hub_lon],
+        popup=f"🏭 {hub_name}",
+        icon=folium.Icon(color="green", icon="warehouse", prefix="fa")
+    ).add_to(m)
+
+    folium.Marker(
+        [home_lat, home_lon],
+        popup=f"🏠 {order['City']}",
+        icon=folium.Icon(color="red", icon="home", prefix="fa")
+    ).add_to(m)
+
+    # Routes
+    folium.PolyLine(
+        [(port_lat, port_lon), (hub_lat, hub_lon)],
+        tooltip=f"Port → Hub ({t1:.2f} hrs)",
+        color="blue"
+    ).add_to(m)
+
+    folium.PolyLine(
+        [(hub_lat, hub_lon), (home_lat, home_lon)],
+        tooltip=f"Hub → Home ({t2:.2f} hrs)",
+        color="green"
+    ).add_to(m)
+
+    # 🚚 Vehicle icon (at hub for now)
+    folium.Marker(
+        [hub_lat, hub_lon],
+        icon=folium.CustomIcon(
+            "https://cdn-icons-png.flaticon.com/512/1995/1995470.png",
+            icon_size=(40, 40)
+        )
+    ).add_to(m)
+
+    st_folium(m, width=900, height=500)
+
     st.metric(
-        label="⏱️ Total Estimated Delivery Time",
-        value=f"{total_time} Hours"
+        "⏱️ Estimated Delivery Time",
+        f"{total_time:.2f} hours"
     )
+
