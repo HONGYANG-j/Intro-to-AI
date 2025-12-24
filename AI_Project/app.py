@@ -10,88 +10,74 @@ from math import radians, sin, cos, sqrt, asin
 # =====================================================
 # PAGE CONFIG
 # =====================================================
-st.set_page_config(
-    page_title="SmartTrack Logistics",
-    layout="wide",
-    page_icon="📦"
-)
+st.set_page_config("SmartTrack Logistics", "📦", layout="wide")
 
 # =====================================================
 # SESSION STATE
 # =====================================================
-for key in ["cust_df", "pc_df", "loc_df", "order", "verified"]:
-    if key not in st.session_state:
-        st.session_state[key] = None if key != "verified" else False
+for k in ["cust_df", "pc_df", "loc_df", "order", "verified"]:
+    if k not in st.session_state:
+        st.session_state[k] = None if k != "verified" else False
 
 # =====================================================
-# STYLES
+# UTILS
 # =====================================================
-st.markdown("""
-<style>
-.header {font-size:26px; font-weight:bold; color:#1F618D;}
-.box {padding:12px; background:#EBF5FB; border-radius:8px; margin-bottom:10px;}
-</style>
-""", unsafe_allow_html=True)
+def normalize_cols(df):
+    df.columns = df.columns.str.strip().str.lower()
+    return df
 
-# =====================================================
-# QR FUNCTIONS
-# =====================================================
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
+    return 2 * R * asin(sqrt(a))
+
 def generate_qr(text):
-    qr = qrcode.make(text)
     buf = io.BytesIO()
-    qr.save(buf)
+    qrcode.make(text).save(buf)
     buf.seek(0)
     return buf
 
 def decode_qr(upload):
-    img = Image.open(upload).convert("RGB")
-    img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
-    detector = cv2.QRCodeDetector()
-    data, _, _ = detector.detectAndDecode(img)
-    return data.strip() if data else None
+    img = cv2.cvtColor(np.array(Image.open(upload)), cv2.COLOR_RGB2GRAY)
+    val, _, _ = cv2.QRCodeDetector().detectAndDecode(img)
+    return val.strip() if val else None
 
 # =====================================================
-# DISTANCE / ETA
-# =====================================================
-def haversine(lat1, lon1, lat2, lon2):
-    R = 6371  # km
-    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
-    return 2 * R * asin(sqrt(a))
-
-# =====================================================
-# SIDEBAR – DATA UPLOAD
+# SIDEBAR UPLOADS
 # =====================================================
 with st.sidebar:
-    st.header("📂 Upload Required Data")
+    st.header("📂 Upload CSV Files")
 
     cust = st.file_uploader("Customer.csv", type="csv")
     if cust:
-        st.session_state.cust_df = pd.read_csv(cust)
-        st.success("Customer data loaded")
+        df = normalize_cols(pd.read_csv(cust))
+        st.session_state.cust_df = df
+        st.success("Customer loaded")
 
     pc = st.file_uploader("Postcode.csv", type=["csv", "txt"])
     if pc:
-        st.session_state.pc_df = pd.read_csv(pc, header=None,
-                                             names=["Postcode", "Area", "City", "State"])
-        st.success("Postcode data loaded")
+        df = pd.read_csv(pc, header=None, sep=None, engine="python")
+        df.columns = ["postcode", "area", "city", "state"]
+        st.session_state.pc_df = normalize_cols(df)
+        st.success("Postcode loaded")
 
     loc = st.file_uploader("Latitude_Longitude.csv", type="csv")
     if loc:
-        st.session_state.loc_df = pd.read_csv(loc)
-        st.success("Location data loaded")
+        df = normalize_cols(pd.read_csv(loc))
+        st.session_state.loc_df = df
+        st.success("Location loaded")
 
 # =====================================================
-# VALIDATION (FIXED)
+# VALIDATION (NO AMBIGUITY)
 # =====================================================
 if (
-    st.session_state.cust_df is None
-    or st.session_state.pc_df is None
-    or st.session_state.loc_df is None
+    st.session_state.cust_df is None or
+    st.session_state.pc_df is None or
+    st.session_state.loc_df is None
 ):
-    st.warning("📌 Please upload ALL 3 CSV files to continue.")
+    st.warning("📌 Upload ALL 3 CSV files to continue")
     st.stop()
 
 cust_df = st.session_state.cust_df
@@ -99,91 +85,86 @@ pc_df = st.session_state.pc_df
 loc_df = st.session_state.loc_df
 
 # =====================================================
+# COLUMN SAFETY CHECKS
+# =====================================================
+required_customer = {"order id", "customer name", "postcode", "state"}
+if not required_customer.issubset(cust_df.columns):
+    st.error(f"Customer.csv must contain: {required_customer}")
+    st.stop()
+
+required_loc = {"area", "latitude", "longitude"}
+if not required_loc.issubset(loc_df.columns):
+    st.error(f"Latitude_Longitude.csv must contain: {required_loc}")
+    st.stop()
+
+# =====================================================
 # TABS
 # =====================================================
 tab1, tab2 = st.tabs(["🛒 Buy & Track", "🚚 Tracking Progress"])
 
 # =====================================================
-# TAB 1 – BUY & VERIFY
+# TAB 1 – QR
 # =====================================================
 with tab1:
-    st.markdown('<p class="header">Customer Portal</p>', unsafe_allow_html=True)
+    st.header("Customer Portal")
 
-    col1, col2 = st.columns(2)
+    choice = st.selectbox(
+        "Select Order",
+        cust_df["order id"].astype(str) + " | " + cust_df["customer name"]
+    )
 
-    with col1:
-        st.markdown('<div class="box">Step 1: Select Order</div>', unsafe_allow_html=True)
-        choice = st.selectbox(
-            "Choose Order",
-            cust_df["Order ID"].astype(str) + " | " + cust_df["Customer Name"]
-        )
+    if st.button("Generate QR"):
+        oid = choice.split(" | ")[0]
+        qr = generate_qr(oid)
+        st.image(qr)
+        st.download_button("Download QR", qr, f"{oid}.png")
 
-        if st.button("Generate QR"):
-            oid = choice.split(" | ")[0]
-            qr = generate_qr(oid)
-            st.image(qr)
-            st.download_button("Download QR", qr, f"{oid}.png")
-
-    with col2:
-        st.markdown('<div class="box">Step 2: Upload QR Code</div>', unsafe_allow_html=True)
-        upload = st.file_uploader("Upload QR", type=["png", "jpg"])
-
-        if upload:
-            result = decode_qr(upload)
-            if result:
-                rec = cust_df[cust_df["Order ID"].astype(str) == result]
-                if not rec.empty:
-                    st.session_state.order = rec.iloc[0]
-                    st.session_state.verified = True
-                    st.success("QR verified successfully ✅")
-                else:
-                    st.error("Order not found")
+    upload = st.file_uploader("Upload QR", type=["png", "jpg"])
+    if upload:
+        decoded = decode_qr(upload)
+        if decoded:
+            row = cust_df[cust_df["order id"].astype(str) == decoded]
+            if not row.empty:
+                st.session_state.order = row.iloc[0]
+                st.session_state.verified = True
+                st.success("QR verified ✅")
             else:
-                st.error("Invalid QR code")
+                st.error("Order not found")
 
 # =====================================================
 # TAB 2 – TRACKING
 # =====================================================
 with tab2:
-    st.markdown('<p class="header">Delivery Tracking</p>', unsafe_allow_html=True)
+    st.header("Delivery Tracking")
 
     if not st.session_state.verified:
-        st.info("""
-        📌 **How to Track**
-        1. Go to Page 1  
-        2. Upload & verify QR code  
-        3. Return here to see delivery progress
-        """)
+        st.info("Upload & verify QR first.")
         st.stop()
 
     order = st.session_state.order
+    postcode = order["postcode"]
 
-    # -------------------------------------------------
-    # LOCATION LOOKUP
-    # -------------------------------------------------
-    pc_row = pc_df[pc_df["Postcode"] == order["Postcode"]]
-    area = pc_row.iloc[0]["Area"]
+    pc_row = pc_df[pc_df["postcode"] == postcode]
+    if pc_row.empty:
+        st.error("Postcode not found")
+        st.stop()
 
-    loc_row = loc_df[loc_df["Area"] == area]
-    home_lat = loc_row.iloc[0]["Latitude"]
-    home_lon = loc_row.iloc[0]["Longitude"]
+    area = pc_row.iloc[0]["area"]
 
-    # Fixed logistics points
-    port = (3.9767, 103.4242)      # Port Kuantan
-    hub = (3.8168, 103.3317)       # Kuantan Hub
+    loc_row = loc_df[loc_df["area"] == area]
+    if loc_row.empty:
+        st.error("Latitude/Longitude not found")
+        st.stop()
+
+    home_lat = loc_row.iloc[0]["latitude"]
+    home_lon = loc_row.iloc[0]["longitude"]
+
+    port = (3.9767, 103.4242)
+    hub = (3.8168, 103.3317)
     home = (home_lat, home_lon)
 
-    # -------------------------------------------------
-    # ETA CALCULATION
-    # -------------------------------------------------
-    d1 = haversine(*port, *hub)     # Truck
-    d2 = haversine(*hub, *home)     # Last mile
+    eta = haversine(*port, *hub)/70 + haversine(*hub, *home)/40
 
-    eta_hours = d1 / 70 + d2 / 40
-
-    # -------------------------------------------------
-    # STATUS STEPS (TAOBAO STYLE)
-    # -------------------------------------------------
     steps = [
         "📦 Order Confirmed",
         "🚚 Picked Up from Port",
@@ -192,26 +173,19 @@ with tab2:
         "✅ Delivered"
     ]
 
-    current_step = 2  # simulate
+    current = 2
+    for i, s in enumerate(steps):
+        st.markdown(
+            f"🔵 **{s}** _(Current)_" if i == current else
+            f"✅ **{s}**" if i < current else
+            f"⚪ {s}"
+        )
 
-    st.markdown("### 📍 Order Progress")
-
-    for i, step in enumerate(steps):
-        if i < current_step:
-            st.markdown(f"✅ **{step}**")
-        elif i == current_step:
-            st.markdown(f"🔵 **{step}** _(Current)_")
-        else:
-            st.markdown(f"⚪ {step}")
-
-    # -------------------------------------------------
-    # INFO BOX
-    # -------------------------------------------------
     st.markdown("---")
     st.info(f"""
-    **Order ID:** {order['Order ID']}  
-    **Customer:** {order['Customer Name']}  
-    **Destination:** {area}, {order['State']}  
-    **Home Coordinates:** ({home_lat:.5f}, {home_lon:.5f})  
-    **Estimated Time Remaining:** ⏱ {eta_hours:.2f} hours  
+    **Order ID:** {order['order id']}  
+    **Area:** {area}  
+    **Home Location:** ({home_lat:.5f}, {home_lon:.5f})  
+    **ETA:** ⏱ {eta:.2f} hours  
     """)
+
