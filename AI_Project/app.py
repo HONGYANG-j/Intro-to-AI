@@ -40,8 +40,13 @@ def generate_qr(text):
     return buf
 
 def decode_qr(upload):
-    img = cv2.cvtColor(np.array(Image.open(upload)), cv2.COLOR_RGB2GRAY)
-    val, _, _ = cv2.QRCodeDetector().detectAndDecode(img)
+    # Force image to RGB to avoid boolean / palette issues
+    pil_img = Image.open(upload).convert("RGB")
+    img = np.array(pil_img)
+
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    val, _, _ = cv2.QRCodeDetector().detectAndDecode(gray)
+
     return val.strip() if val else None
 
 # =====================================================
