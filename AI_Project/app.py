@@ -41,14 +41,21 @@ def generate_qr(text):
 
 def decode_qr(upload):
     try:
-        pil_img = Image.open(upload).convert("RGB")
+        pil_img = Image.open(upload).convert("L")  # grayscale
         img = np.array(pil_img)
+
+        # 🔧 upscale image (CRITICAL FIX)
+        img = cv2.resize(img, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+
+        # 🔧 apply threshold to improve contrast
+        _, img = cv2.threshold(img, 150, 255, cv2.THRESH_BINARY)
 
         detector = cv2.QRCodeDetector()
         val, _, _ = detector.detectAndDecode(img)
 
         return val.strip() if val else None
-    except Exception as e:
+
+    except Exception:
         return None
 
 # =====================================================
