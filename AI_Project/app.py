@@ -83,18 +83,18 @@ pc_df = st.session_state.pc_df
 loc_df = st.session_state.loc_df
 
 # =====================================================
-# COLUMN CHECKS (MATCH REAL DATA)
+# COLUMN SAFETY CHECKS
 # =====================================================
-required_customer = {
-    "order id", "customer name", "postal code", "quantity"
-}
+
+required_customer = {"order id", "customer name", "postal code", "state"}
 if not required_customer.issubset(cust_df.columns):
-    st.error("Customer.csv missing required columns")
+    st.error(f"Customer.csv must contain: {required_customer}")
     st.stop()
 
-required_loc = {"states","district","town", "latitude", "longitude"}
+# 🔧 FIXED FOR YOUR REAL FILE
+required_loc = {"town", "lat", "lon"}
 if not required_loc.issubset(loc_df.columns):
-    st.error("Latitude_Longitude.csv missing required columns")
+    st.error("Latitude_Longitude.csv must contain: Town, Lat, Lon")
     st.stop()
 
 # =====================================================
@@ -143,7 +143,7 @@ with tab2:
 
     order = st.session_state.order
 
-    # 🔧 FIXED: correct column name
+    # 🔧 FIX: correct column name
     postcode = str(order["postal code"])
 
     pc_row = pc_df[pc_df["postcode"].astype(str) == postcode]
@@ -153,29 +153,22 @@ with tab2:
 
     area = pc_row.iloc[0]["area"]
 
-    loc_row = loc_df[loc_df["area"] == area]
+    # 🔧 FIX: Town → area
+    loc_row = loc_df[loc_df["town"] == area]
     if loc_row.empty:
-        st.error("Latitude/Longitude not found")
+        st.error("Latitude/Longitude not found for this area")
         st.stop()
 
-    home_lat = loc_row.iloc[0]["latitude"]
-    home_lon = loc_row.iloc[0]["longitude"]
+    home_lat = loc_row.iloc[0]["lat"]
+    home_lon = loc_row.iloc[0]["lon"]
 
-    # Fixed locations
-    port = (3.9767, 103.4242)  # Port Kuantan
-    hub = (3.8168, 103.3317)   # Kuantan Hub
-    home = (home_lat, home_lon)
+    port = (3.9767, 103.4242)   # Port Kuantan
+    hub = (3.8168, 103.3317)    # Hub
 
-    d1 = haversine(*port, *hub)
-    d2 = haversine(*hub, *home)
-    total_distance = d1 + d2
-
-    eta = d1 / 70 + d2 / 40
-
-    # 💰 DELIVERY COST
-    distance_cost = total_distance * 0.50
-    quantity_cost = order["quantity"] * 2.0
-    total_cost = distance_cost + quantity_cost
+    eta = (
+        haversine(*port, *hub) / 70 +
+        haversine(*hub, home_lat, home_lon) / 40
+    )
 
     steps = [
         "📦 Order Confirmed",
@@ -199,5 +192,4 @@ with tab2:
     **Area:** {area}  
     **Home Location:** ({home_lat:.5f}, {home_lon:.5f})  
     **ETA:** ⏱ {eta:.2f} hours  
-    **Estimated Cost:** 💰 RM {total_cost:.2f}
     """)
