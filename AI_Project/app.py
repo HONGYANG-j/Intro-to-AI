@@ -172,14 +172,25 @@ with tab2:
 
     area = pc_row.iloc[0]["area"]
 
-    # 🔧 FIX: Town → area
-    loc_row = loc_df[loc_df["town"] == area]
+    # Normalize comparison to avoid spacing / case issues
+    area_norm = area.strip().lower()
+
+    loc_df["town_norm"] = loc_df["town"].astype(str).str.strip().str.lower()
+
+    loc_row = loc_df[loc_df["town_norm"] == area_norm]
+
+    # 🔁 Fallback: try district if town match fails
+    if loc_row.empty and "district" in loc_df.columns:
+        loc_df["district_norm"] = loc_df["district"].astype(str).str.strip().str.lower()
+        loc_row = loc_df[loc_df["district_norm"] == area_norm]
+
     if loc_row.empty:
-        st.error("Latitude/Longitude not found for this area")
+        st.error(f"Latitude/Longitude not found for area: {area}")
         st.stop()
 
     home_lat = loc_row.iloc[0]["lat"]
     home_lon = loc_row.iloc[0]["lon"]
+
 
     port = (3.9767, 103.4242)   # Port Kuantan
     hub = (3.8168, 103.3317)    # Hub
