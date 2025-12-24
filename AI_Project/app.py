@@ -125,57 +125,49 @@ with tab1:
 # TAB 2 – DELIVERY TRACKING
 # ==========================================
 with tab2:
-    st.markdown('<p class="header">Live Delivery Tracking</p>', unsafe_allow_html=True)
+    st.markdown('<p class="header">Current Delivery Status</p>', unsafe_allow_html=True)
 
     if not st.session_state.verified:
         st.info("""
-        📌 **Instructions**
-        1. Go to Page 1  
-        2. Upload your QR code  
-        3. Verify the order  
-        4. Come back here to track delivery
+        📌 **How to Track Your Parcel**
+        1. Go to **Page 1**
+        2. Upload and verify your QR code
+        3. Return here to view delivery status
         """)
         st.stop()
 
-    order = st.session_state.order
-
-    # LOCATIONS
-    port = (3.9767, 103.4242)
-    hub = (3.8168, 103.3317)
-    home = (hub[0] + 0.12, hub[1] + 0.12)
-
-    d1 = haversine(*port, *hub)
-    d2 = haversine(*hub, *home)
-    eta = d1/80 + d2/60
-
-    # STATUS STEPS
-    statuses = [
+    # ======================================
+    # DELIVERY STATUS STEPS (Taobao Style)
+    # ======================================
+    steps = [
         "📦 Order Confirmed",
-        "🚢 Picked up from Port Kuantan",
-        "🏭 Arrived at Hub",
+        "🚚 Picked Up from Port",
+        "🏭 At Hub (Kuantan)",
         "🛵 Out for Delivery",
         "✅ Delivered"
     ]
 
-    st.markdown("### 📍 Current Delivery Status")
+    # 🔧 CHANGE THIS TO SIMULATE STATUS
+    # 0 = confirmed, 1 = picked up, ..., 4 = delivered
+    current_step = 2   # Example: At Hub
 
-    status_box = st.empty()
-    progress = st.progress(0)
+    st.markdown("### 📍 Tracking Progress")
 
-    for i in range(100):
-        time.sleep(0.03)
-        progress.progress(i+1)
-
-        if i < 20:
-            status_box.markdown(f"<p class='status'>{statuses[0]}</p>", unsafe_allow_html=True)
-        elif i < 45:
-            status_box.markdown(f"<p class='status'>{statuses[1]}</p>", unsafe_allow_html=True)
-        elif i < 65:
-            status_box.markdown(f"<p class='status'>{statuses[2]}</p>", unsafe_allow_html=True)
-        elif i < 85:
-            status_box.markdown(f"<p class='status'>{statuses[3]}</p>", unsafe_allow_html=True)
+    for i, step in enumerate(steps):
+        if i < current_step:
+            st.markdown(f"✅ **{step}**")
+        elif i == current_step:
+            st.markdown(f"🔵 **{step}** _(Current Status)_")
         else:
-            status_box.markdown(f"<p class='status'>{statuses[4]}</p>", unsafe_allow_html=True)
+            st.markdown(f"⚪ {step}")
 
-    st.success("🎉 Parcel successfully delivered")
-    st.metric("Estimated Delivery Time", f"{eta:.2f} hours")
+    # ======================================
+    # EXTRA INFO BOX
+    # ======================================
+    st.markdown("---")
+    st.info(f"""
+    📦 **Order ID:** {st.session_state.order['Order ID']}  
+    👤 **Customer:** {st.session_state.order['Customer Name']}  
+    📍 **Destination:** {st.session_state.order['City']}, {st.session_state.order['State']}  
+    🏭 **Parcel Hub:** Kuantan  
+    """)
