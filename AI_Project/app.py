@@ -136,6 +136,15 @@ with tab2:
         """)
         st.stop()
 
+    # LOCATIONS
+    port = (3.9767, 103.4242)
+    hub = (3.8168, 103.3317)
+    home = (hub[0] + 0.12, hub[1] + 0.12)
+
+    d1 = haversine(*port, *hub)
+    d2 = haversine(*hub, *home)
+    eta = d1/80 + d2/60
+    
     # ======================================
     # DELIVERY STATUS STEPS (Taobao Style)
     # ======================================
