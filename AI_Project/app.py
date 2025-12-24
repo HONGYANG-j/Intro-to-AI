@@ -92,7 +92,7 @@ if not required_customer.issubset(cust_df.columns):
     st.error("Customer.csv missing required columns")
     st.stop()
 
-required_loc = {"area", "latitude", "longitude"}
+required_loc = {"states","district","town", "latitude", "longitude"}
 if not required_loc.issubset(loc_df.columns):
     st.error("Latitude_Longitude.csv missing required columns")
     st.stop()
