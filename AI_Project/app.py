@@ -40,14 +40,16 @@ def generate_qr(text):
     return buf
 
 def decode_qr(upload):
-    # Force image to RGB to avoid boolean / palette issues
-    pil_img = Image.open(upload).convert("RGB")
-    img = np.array(pil_img)
+    try:
+        pil_img = Image.open(upload).convert("RGB")
+        img = np.array(pil_img)
 
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    val, _, _ = cv2.QRCodeDetector().detectAndDecode(gray)
+        detector = cv2.QRCodeDetector()
+        val, _, _ = detector.detectAndDecode(img)
 
-    return val.strip() if val else None
+        return val.strip() if val else None
+    except Exception as e:
+        return None
 
 # =====================================================
 # SIDEBAR UPLOADS
@@ -124,11 +126,20 @@ with tab1:
         st.image(qr)
         st.download_button("Download QR", qr, f"{oid}.png")
 
-    upload = st.file_uploader("Upload QR", type=["png", "jpg"])
+    upload = st.file_uploader(
+        "Upload QR",
+        type=["png", "jpg"],
+        key="qr_upload"
+    )
+
     if upload:
         decoded = decode_qr(upload)
-        if decoded:
+
+        if decoded is None:
+            st.error("❌ Unable to read QR code. Please upload a clear QR image.")
+        else:
             row = cust_df[cust_df["order id"].astype(str) == decoded]
+
             if not row.empty:
                 st.session_state.order = row.iloc[0]
                 st.session_state.verified = True
