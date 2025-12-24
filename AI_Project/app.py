@@ -15,7 +15,7 @@ st.set_page_config("SmartTrack Logistics", "📦", layout="wide")
 # =====================================================
 # SESSION STATE
 # =====================================================
-for k in ["cust_df", "pc_df", "loc_df", "order", "verified"]:
+for k in ["cust_df", "loc_df", "order", "verified"]:
     if k not in st.session_state:
         st.session_state[k] = None if k != "verified" else False
 
@@ -30,7 +30,7 @@ def haversine(lat1, lon1, lat2, lon2):
     R = 6371
     lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
     dlat, dlon = lat2 - lat1, lon2 - lon1
-    a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
     return 2 * R * asin(sqrt(a))
 
 def generate_qr(text):
@@ -41,20 +41,17 @@ def generate_qr(text):
 
 def decode_qr(upload):
     try:
-        pil_img = Image.open(upload).convert("L")  # grayscale
+        pil_img = Image.open(upload).convert("L")
         img = np.array(pil_img)
 
-        # 🔧 upscale image (CRITICAL FIX)
+        # Upscale + threshold (critical for Streamlit QR decoding)
         img = cv2.resize(img, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-
-        # 🔧 apply threshold to improve contrast
         _, img = cv2.threshold(img, 150, 255, cv2.THRESH_BINARY)
 
         detector = cv2.QRCodeDetector()
         val, _, _ = detector.detectAndDecode(img)
 
         return val.strip() if val else None
-
     except Exception:
         return None
 
@@ -69,46 +66,35 @@ with st.sidebar:
         st.session_state.cust_df = normalize_cols(pd.read_csv(cust))
         st.success("Customer loaded")
 
-    pc = st.file_uploader("Postcode.csv", type=["csv", "txt"])
-    if pc:
-        df = pd.read_csv(pc, header=None, sep=None, engine="python")
-        df.columns = ["postcode", "area", "city", "state"]
-        st.session_state.pc_df = normalize_cols(df)
-        st.success("Postcode loaded")
-
-    loc = st.file_uploader("Latitude_Longitude.csv", type="csv")
+    loc = st.file_uploader("Postcode + Location.csv", type="csv")
     if loc:
         st.session_state.loc_df = normalize_cols(pd.read_csv(loc))
-        st.success("Location loaded")
+        st.success("Postcode & Location loaded")
 
 # =====================================================
 # VALIDATION
 # =====================================================
 if (
     st.session_state.cust_df is None or
-    st.session_state.pc_df is None or
     st.session_state.loc_df is None
 ):
-    st.warning("📌 Upload ALL 3 CSV files to continue")
+    st.warning("📌 Upload ALL required CSV files to continue")
     st.stop()
 
 cust_df = st.session_state.cust_df
-pc_df = st.session_state.pc_df
 loc_df = st.session_state.loc_df
 
 # =====================================================
 # COLUMN SAFETY CHECKS
 # =====================================================
-
 required_customer = {"order id", "customer name", "postal code", "state"}
 if not required_customer.issubset(cust_df.columns):
-    st.error(f"Customer.csv must contain: {required_customer}")
+    st.error("Customer.csv must contain: order id, customer name, postal code, state")
     st.stop()
 
-# 🔧 FIXED FOR YOUR REAL FILE
-required_loc = {"postcode", "city_name", "lat", "lon"}
+required_loc = {"postcode", "city_name", "latitude", "longitude"}
 if not required_loc.issubset(loc_df.columns):
-    st.error("Latitude_Longitude.csv must contain: city_name, Lat, Lon")
+    st.error("Location CSV must contain: postcode, city_name, latitude, longitude")
     st.stop()
 
 # =====================================================
@@ -117,7 +103,7 @@ if not required_loc.issubset(loc_df.columns):
 tab1, tab2 = st.tabs(["🛒 Buy & Track", "🚚 Tracking Progress"])
 
 # =====================================================
-# TAB 1 – QR
+# TAB 1 – BUY & TRACK
 # =====================================================
 with tab1:
     st.header("Customer Portal")
@@ -167,7 +153,6 @@ with tab1:
                 Please return to **Buy & Track** and place a new order.
                 """)
 
-
 # =====================================================
 # TAB 2 – TRACKING
 # =====================================================
@@ -179,36 +164,16 @@ with tab2:
         st.stop()
 
     order = st.session_state.order
-
-    # 🔧 FIX: correct column name
     postcode = str(order["postal code"])
 
-    pc_row = pc_df[pc_df["postcode"].astype(str) == postcode]
-    if pc_row.empty:
-        st.error("Postcode not found")
-        st.stop()
-
-    area = pc_row.iloc[0]["area"]
-
-    # Normalize comparison to avoid spacing / case issues
-    area_norm = area.strip().lower()
-
-    loc_df["town_norm"] = loc_df["town"].astype(str).str.strip().str.lower()
-
-    loc_row = loc_df[loc_df["town_norm"] == area_norm]
-
-    # 🔁 Fallback: try district if town match fails
-    if loc_row.empty and "district" in loc_df.columns:
-        loc_df["district_norm"] = loc_df["district"].astype(str).str.strip().str.lower()
-        loc_row = loc_df[loc_df["district_norm"] == area_norm]
-
+    loc_row = loc_df[loc_df["postcode"].astype(str) == postcode]
     if loc_row.empty:
-        st.error(f"Latitude/Longitude not found for area: {area}")
+        st.error(f"Latitude/Longitude not found for postcode: {postcode}")
         st.stop()
 
-    home_lat = loc_row.iloc[0]["lat"]
-    home_lon = loc_row.iloc[0]["lon"]
-
+    area = loc_row.iloc[0]["city_name"]
+    home_lat = loc_row.iloc[0]["latitude"]
+    home_lon = loc_row.iloc[0]["longitude"]
 
     port = (3.9767, 103.4242)   # Port Kuantan
     hub = (3.8168, 103.3317)    # Hub
