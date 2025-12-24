@@ -106,9 +106,9 @@ if not required_customer.issubset(cust_df.columns):
     st.stop()
 
 # 🔧 FIXED FOR YOUR REAL FILE
-required_loc = {"town", "lat", "lon"}
+required_loc = {"postcode", "city_name", "lat", "lon"}
 if not required_loc.issubset(loc_df.columns):
-    st.error("Latitude_Longitude.csv must contain: Town, Lat, Lon")
+    st.error("Latitude_Longitude.csv must contain: city_name, Lat, Lon")
     st.stop()
 
 # =====================================================
