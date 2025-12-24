@@ -5,7 +5,6 @@ import numpy as np
 from PIL import Image
 import qrcode
 import io
-import time
 from math import radians, sin, cos, sqrt, asin
 
 # ==========================================
@@ -16,12 +15,11 @@ st.set_page_config(page_title="SmartTrack Logistics", layout="wide", page_icon="
 # ==========================================
 # SESSION STATE
 # ==========================================
-if "df" not in st.session_state:
-    st.session_state.df = None
-if "order" not in st.session_state:
-    st.session_state.order = None
-if "verified" not in st.session_state:
-    st.session_state.verified = False
+for key in ["df", "order", "verified", "loc_df", "pc_df"]:
+    if key not in st.session_state:
+        st.session_state[key] = None
+
+st.session_state.verified = st.session_state.verified or False
 
 # ==========================================
 # STYLES
@@ -30,7 +28,6 @@ st.markdown("""
 <style>
 .header {font-size:26px; font-weight:bold; color:#1F618D;}
 .box {padding:12px; background:#EBF5FB; border-radius:8px; margin-bottom:10px;}
-.status {font-size:18px; font-weight:bold;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -47,12 +44,11 @@ def generate_qr(text):
 def decode_qr(upload):
     img = Image.open(upload).convert("RGB")
     img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
-    detector = cv2.QRCodeDetector()
-    data, _, _ = detector.detectAndDecode(img)
+    data, _, _ = cv2.QRCodeDetector().detectAndDecode(img)
     return data.strip() if data else None
 
 # ==========================================
-# DISTANCE (ETA)
+# HAVERSINE DISTANCE
 # ==========================================
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371
@@ -63,17 +59,28 @@ def haversine(lat1, lon1, lat2, lon2):
     return 2 * R * asin(sqrt(a))
 
 # ==========================================
-# SIDEBAR
+# SIDEBAR UPLOADS
 # ==========================================
 with st.sidebar:
-    st.header("⚙️ Setup")
-    file = st.file_uploader("Upload Customer.csv", type="csv")
-    if file:
-        st.session_state.df = pd.read_csv(file)
-        st.success("Data loaded")
+    st.header("⚙️ Data Setup")
 
-if st.session_state.df is None:
-    st.warning("Upload Customer.csv to continue")
+    cust = st.file_uploader("Upload Customer.csv", type="csv")
+    if cust:
+        st.session_state.df = pd.read_csv(cust)
+        st.success("Customer data loaded")
+
+    loc = st.file_uploader("Upload Pahang Locations CSV", type="csv")
+    if loc:
+        st.session_state.loc_df = pd.read_csv(loc)
+        st.success("Location data loaded")
+
+    pc = st.file_uploader("Upload Pahang Postcode CSV", type="csv")
+    if pc:
+        st.session_state.pc_df = pd.read_csv(pc)
+        st.success("Postcode data loaded")
+
+if None in (st.session_state.df, st.session_state.loc_df, st.session_state.pc_df):
+    st.warning("Please upload ALL required CSV files.")
     st.stop()
 
 df = st.session_state.df
@@ -92,7 +99,6 @@ with tab1:
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown('<div class="box">Step 1: Select Order</div>', unsafe_allow_html=True)
         choice = st.selectbox(
             "Choose Order",
             df["Order ID"].astype(str) + " | " + df["Customer Name"]
@@ -105,7 +111,6 @@ with tab1:
             st.download_button("Download QR", qr, f"{oid}.png")
 
     with col2:
-        st.markdown('<div class="box">Step 2: Upload QR to Track</div>', unsafe_allow_html=True)
         upload = st.file_uploader("Upload QR Code", type=["png", "jpg"])
 
         if upload:
@@ -128,26 +133,33 @@ with tab2:
     st.markdown('<p class="header">Current Delivery Status</p>', unsafe_allow_html=True)
 
     if not st.session_state.verified:
-        st.info("""
-        📌 **How to Track Your Parcel**
-        1. Go to **Page 1**
-        2. Upload and verify your QR code
-        3. Return here to view delivery status
-        """)
+        st.info("Please verify QR code on Page 1.")
         st.stop()
 
-    # LOCATIONS
+    order = st.session_state.order
+
+    # Port & Hub
     port = (3.9767, 103.4242)
     hub = (3.8168, 103.3317)
-    home = (hub[0] + 0.12, hub[1] + 0.12)
 
+    # Receiver location lookup
+    area = st.session_state.pc_df[
+        st.session_state.pc_df["postcode"] == order["Postcode"]
+    ]["area"].values[0]
+
+    loc = st.session_state.loc_df[
+        st.session_state.loc_df["area"] == area
+    ].iloc[0]
+
+    home = (loc["latitude"], loc["longitude"])
+
+    # Distance & ETA
     d1 = haversine(*port, *hub)
     d2 = haversine(*hub, *home)
-    eta = d1/80 + d2/60
-    
-    # ======================================
-    # DELIVERY STATUS STEPS (Taobao Style)
-    # ======================================
+
+    eta = d1 / 80 + d2 / 60  # hours
+
+    # STATUS STEPS
     steps = [
         "📦 Order Confirmed",
         "🚚 Picked Up from Port",
@@ -156,12 +168,9 @@ with tab2:
         "✅ Delivered"
     ]
 
-    # 🔧 CHANGE THIS TO SIMULATE STATUS
-    # 0 = confirmed, 1 = picked up, ..., 4 = delivered
-    current_step = 2   # Example: At Hub
+    current_step = 2
 
     st.markdown("### 📍 Tracking Progress")
-
     for i, step in enumerate(steps):
         if i < current_step:
             st.markdown(f"✅ **{step}**")
@@ -170,13 +179,14 @@ with tab2:
         else:
             st.markdown(f"⚪ {step}")
 
-    # ======================================
-    # EXTRA INFO BOX
-    # ======================================
     st.markdown("---")
     st.info(f"""
-    📦 **Order ID:** {st.session_state.order['Order ID']}  
-    👤 **Customer:** {st.session_state.order['Customer Name']}  
-    📍 **Destination:** {st.session_state.order['City']}, {st.session_state.order['State']}  
-    🏭 **Parcel Hub:** Kuantan  
-    """)
+📦 **Order ID:** {order['Order ID']}  
+👤 **Customer:** {order['Customer Name']}  
+📍 **Area:** {area}  
+📌 **Latitude:** {home[0]:.5f}  
+📌 **Longitude:** {home[1]:.5f}  
+
+🚚 **Total Distance:** {(d1+d2):.2f} km  
+⏱ **Estimated Delivery Time:** {eta:.2f} hours
+""")
