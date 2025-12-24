@@ -132,9 +132,23 @@ with tab1:
             if not row.empty:
                 st.session_state.order = row.iloc[0]
                 st.session_state.verified = True
-                st.success("QR verified ✅")
+                st.success("QR verified successfully ✅")
+
+                st.info("""
+                👉 **Next Step**
+                1. Click on **🚚 Tracking Progress** tab  
+                2. View your real-time delivery status  
+
+                If tracking does not appear, please contact support.
+                """)
+
             else:
-                st.error("Order not found")
+                st.error("""
+                ❌ Order not found
+
+                Please return to **Buy & Track** and place a new order.
+                """)
+
 
 # =====================================================
 # TAB 2 – TRACKING
