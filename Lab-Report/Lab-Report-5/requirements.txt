@@ -1,5 +1,4 @@
 streamlit
 PyTorch
 Torchvision
-PIL
 Pandas
