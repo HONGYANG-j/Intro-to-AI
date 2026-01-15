@@ -186,7 +186,7 @@ DEFAULT_RULES: List[Dict[str, Any]] = [
         "action": {
             "ac_mode": "OFF",
             "fan_speed": "LOW",
-            "setpoint": null,
+            "setpoint": None,
             "reason": "Already cold"
         }
     },
