@@ -233,9 +233,9 @@ with st.sidebar:
     st.header("Home Condition")
     temperature = st.number_input("Temperature", min_value=0, max_value= 30, step=1, value=22)
     humidity = st.number_input("Humidity", min_value=0, max_value=100, step=1, value=46)
-    occupancy = st.number_input("Occupancy", min_value=0.0, max_value=5.0, step=0.01, value=0.45)
-    time_of_day = st.number_input("Time of Day", min_value=0, step=1, value=2)
-    windows_open = st.text_input("Windows (Open/Close)", value=true)
+    occupancy = st.selectbox("Occupancy", ["OCCUPIED", "EMPTY"])
+    time_of_day = st.selectbox("Time of Day", ["MORNING", "AFTERNOON", "EVENING", "NIGHT"])
+    windows_open = st.checkbox("Windows Open", value=False)
 
     st.divider()
     st.header("Rules (JSON)")
@@ -246,11 +246,11 @@ with st.sidebar:
     run = st.button("Evaluate", type="primary")
 
 facts = {
-    "temperature": float(income),
-    "humidity": int(credit_score),
-    "occupancy": float(debt_to_income),
-    "time_of_day": int(employment_years),
-    "windows_open": int(age),
+    "temperature": int(temperature),
+    "humidity": int(humidity),
+    "occupancy": occupancy,
+    "time_of_day": time_of_day,
+    "windows_open": windows_open,
 }
 
 st.subheader("Applicant Facts")
