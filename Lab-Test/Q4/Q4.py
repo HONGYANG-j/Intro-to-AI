@@ -40,15 +40,15 @@ if uploaded_file is not None:
             # Controls to view sentences in a range
             start_idx = st.number_input(
                 "Show sentences starting from index",
-                min_value=58,
+                min_value=0,
                 max_value=max(len(sentences) - 1, 0),
-                value=58,
+                value=0,
                 step=1,
             )
             end_idx = st.number_input(
                 "Up to (exclusive)",
                 min_value=start_idx + 1 if len(sentences) > 0 else 1,
-                max_value=69,
+                max_value=len(sentences),
                 value=min(start_idx + 10, len(sentences)),
                 step=1,
             )
