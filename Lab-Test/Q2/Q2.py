@@ -4,21 +4,6 @@ from typing import List, Dict, Any, Tuple
 import operator
 import streamlit as st
 
-# ----------------------------
-# 1) Minimal rule engine
-# ----------------------------
-# A rule shape:
-# {
-#   "name": "High income & good credit",
-#   "priority": 90,               # higher wins if multiple actions conflict
-#   "conditions": [               # all must be true (AND)
-#       ["income", ">=", 6000],
-#       ["credit_score", ">=", 700],
-#       ["debt_to_income", "<", 0.4]
-#   ],
-#   "action": {"decision": "APPROVE", "reason": "Strong income & credit"}
-# }
-
 OPS = {
     "==": operator.eq,
     "!=": operator.ne,
@@ -235,7 +220,7 @@ with st.sidebar:
     humidity = st.number_input("Humidity", min_value=0, max_value=100, step=1, value=46)
     occupancy = st.selectbox("Occupancy", ["OCCUPIED", "EMPTY"])
     time_of_day = st.selectbox("Time of Day", ["MORNING", "AFTERNOON", "EVENING", "NIGHT"])
-    windows_open = st.checkbox("Windows Open", value=False)
+    windows_open = st.selectbox("Windows Open", ["True", "False"])
 
     st.divider()
     st.header("Rules (JSON)")
