@@ -48,7 +48,7 @@ if uploaded_file is not None:
             end_idx = st.number_input(
                 "Up to (exclusive)",
                 min_value=start_idx + 1 if len(sentences) > 0 else 1,
-                max_value=68,
+                max_value=69,
                 value=min(start_idx + 10, len(sentences)),
                 step=1,
             )
