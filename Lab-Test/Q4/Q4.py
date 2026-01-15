@@ -41,7 +41,7 @@ if uploaded_file is not None:
                 "Show sentences starting from index",
                 min_value=58,
                 max_value=max(len(sentences) - 1, 0),
-                value=0,
+                value=58,
                 step=1,
             )
             end_idx = st.number_input(
