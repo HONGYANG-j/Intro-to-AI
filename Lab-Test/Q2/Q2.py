@@ -38,7 +38,7 @@ DEFAULT_RULES: List[Dict[str, Any]] = [
             [
                 "windows_open",
                 "==",
-                true
+                True
             ]
         ],
         "action": {
